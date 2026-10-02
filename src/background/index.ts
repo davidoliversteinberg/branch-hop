@@ -5,6 +5,9 @@ import { clearTabState, getNames, getTabState, recordVisit, setTabState } from "
 import { POLL_ALARM, cancelSignIn, getStatus, isSignedIn, pollOnce, signOut, startSignIn, whenSignedIn } from "./auth.ts";
 import { GhError } from "./gh.ts";
 import { SYNC_ALARM, addComment, listComments, markRead, onNoticeClick, share, sync, unshare, updateBadge } from "./shared.ts";
+import { UPDATE_ALARM, checkForUpdate, reloadIfFolderUpdated } from "./updates.ts";
+
+const FOLDER_ALARM = "folder-check";
 
 const SYNC_MINUTES = 2;
 
@@ -43,7 +46,11 @@ async function startSyncing(): Promise<void> {
 whenSignedIn(() => void startSyncing());
 
 async function resume(): Promise<void> {
+  if (await reloadIfFolderUpdated()) return;
+  await chrome.alarms.create(UPDATE_ALARM, { periodInMinutes: 360 });
+  await chrome.alarms.create(FOLDER_ALARM, { periodInMinutes: 1 });
   if (await isSignedIn()) await startSyncing();
+  await checkForUpdate();
   await updateBadge();
 }
 chrome.runtime.onStartup.addListener(() => void resume());
@@ -52,6 +59,8 @@ chrome.runtime.onInstalled.addListener(() => void resume());
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === POLL_ALARM) void pollOnce();
   if (alarm.name === SYNC_ALARM) void sync();
+  if (alarm.name === UPDATE_ALARM) void checkForUpdate();
+  if (alarm.name === FOLDER_ALARM) void reloadIfFolderUpdated();
 });
 
 chrome.notifications?.onClicked.addListener((id) => void onNoticeClick(id));
@@ -76,16 +85,18 @@ async function handle(req: Request): Promise<unknown> {
       return endSession();
     case "sync":
       return sync();
+    case "check-update":
+      return (await reloadIfFolderUpdated()) ? null : checkForUpdate();
     case "share":
       return share(req);
     case "unshare":
-      return unshare(req.issue);
+      return unshare(req.space, req.issue);
     case "comments":
-      return listComments(req.issue);
+      return listComments(req.space, req.issue);
     case "comment":
-      return addComment(req.issue, req.body);
+      return addComment(req.space, req.issue, req.body);
     case "mark-read":
-      return markRead(req.issues);
+      return markRead(req.ids);
   }
 }
 

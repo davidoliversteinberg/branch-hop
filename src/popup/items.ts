@@ -1,4 +1,4 @@
-import type { SharedBranch } from "../shared/github.ts";
+import { issueId, type SharedBranch } from "../shared/github.ts";
 import type { Unread } from "../shared/messages.ts";
 import type { PreviewStatus } from "../shared/nav";
 import type { Favorite, Visit } from "../shared/store";
@@ -71,12 +71,12 @@ export function buildGroups({ ext, shared, me, seen }: Sources, view: View, quer
   const fromVisit = (v: Visit): Item => ({ ...base(v.key), id: `recent-${v.key}`, subtitle: favs.get(v.key)?.note ?? routePath(v.route), route: v.route, time: ago(v.at) });
   const fromShared = (s: SharedBranch): Item => ({
     ...base(s.key),
-    id: `shared-${s.number}`,
+    id: `shared-${s.space}-${s.number}`,
     subtitle: s.note ?? `Shared by @${s.sharedBy}`,
     exactRoute: s.route,
     time: ago(Date.parse(s.updatedAt)),
     shared: s,
-    unread: !!seen[String(s.number)],
+    unread: !!seen[issueId(s.space, s.number)],
   });
 
   const lastSeen = (f: Favorite) => visits.get(f.key)?.at ?? f.addedAt;
@@ -114,11 +114,16 @@ export function buildGroups({ ext, shared, me, seen }: Sources, view: View, quer
 
 /** Shared with you first, then each list, then everything else. Each branch appears once. */
 function sharedGroups(shared: SharedBranch[], me: string | null, toItem: (s: SharedBranch) => Item): ItemGroup[] {
-  const used = new Set<number>();
-  const take = (list: SharedBranch[]) => list.filter((s) => !used.has(s.number) && used.add(s.number)).map(toItem);
+  const used = new Set<string>();
+  const id = (s: SharedBranch) => issueId(s.space, s.number);
+  const take = (list: SharedBranch[]) => list.filter((s) => !used.has(id(s)) && used.add(id(s))).map(toItem);
+  const multi = new Set(shared.map((s) => s.space)).size > 1;
   const groups: ItemGroup[] = [{ id: "with-you", label: "Shared with you", items: take(shared.filter((s) => !!me && s.sharedWith.includes(me) && s.sharedBy !== me)) }];
-  const listNames = [...new Set(shared.flatMap((s) => s.lists))].sort((a, b) => a.localeCompare(b));
-  for (const name of listNames) groups.push({ id: `list-${name}`, label: name, items: take(shared.filter((s) => s.lists.includes(name))) });
+  // Lists belong to a space; with more than one space, the label says which.
+  const lists = [...new Map(shared.flatMap((s) => s.lists.map((name) => [`${s.space}/${name}`, { space: s.space, name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
+  for (const l of lists) {
+    groups.push({ id: `list-${l.space}-${l.name}`, label: multi ? `${l.name} · ${l.space}` : l.name, items: take(shared.filter((s) => s.space === l.space && s.lists.includes(l.name))) });
+  }
   const rest = take(shared);
   groups.push({ id: "everything", label: groups.some((g) => g.items.length) ? "Everything else" : "Shared", items: rest });
   return groups.filter((g) => g.items.length);

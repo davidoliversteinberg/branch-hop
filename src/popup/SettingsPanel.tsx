@@ -1,18 +1,32 @@
 import { Avatar, Box, Button, Group, Kbd, Separator, Switch, Text, toaster } from "@optiaxiom/react";
-import type { AuthStatus } from "../shared/messages.ts";
+import { SHARED_REPO_NAME } from "../shared/github.ts";
+import type { AuthStatus, SharedState, SharedStatus, UpdateInfo } from "../shared/messages.ts";
 import { clearRecent, setSetting } from "../shared/store";
 import type { ExtState } from "./useExtensionState";
 import { send } from "./useGitHub";
 
+const SPACE_STATUS: Record<SharedStatus, string> = {
+  ok: "Working",
+  sso: "Needs single sign-on",
+  "no-access": "Can't see it",
+  "no-permission": "App needs Issues permission",
+  "rate-limited": "Waiting for GitHub",
+  offline: "Can't reach GitHub",
+  "signed-out": "Signed out",
+  "no-space": "Not set up",
+};
+
 export function SettingsPanel({
   ext,
   auth,
+  shared,
   shortcuts,
   onSignIn,
   onDone,
 }: {
   ext: ExtState;
   auth: AuthStatus;
+  shared: SharedState;
   shortcuts: { open: string; flip: string };
   onSignIn: () => void;
   onDone: () => void;
@@ -66,6 +80,31 @@ export function SettingsPanel({
           </Group>
         )}
       </Box>
+
+      {signedIn && (
+        <Box display="flex" flexDirection="column" gap="8">
+          <Text fontSize="sm" fontWeight="500">
+            Shared spaces
+          </Text>
+          {shared.spaces.length ? (
+            shared.spaces.map((sp) => (
+              <Group key={sp.owner} justifyContent="space-between" alignItems="center" gap="8">
+                <Text fontSize="sm">
+                  {sp.owner}/{SHARED_REPO_NAME}
+                  {sp.org ? "" : " (you)"}
+                </Text>
+                <Text fontSize="sm" color={sp.status === "ok" ? "fg.tertiary" : "fg.warning.strong"}>
+                  {SPACE_STATUS[sp.status]}
+                </Text>
+              </Group>
+            ))
+          ) : (
+            <Text fontSize="sm" color="fg.secondary">
+              None yet. The Branch Hop app is installed on {shared.installedOn.length ? shared.installedOn.join(", ") : "no accounts"}, but none of them has a {SHARED_REPO_NAME} repo.
+            </Text>
+          )}
+        </Box>
+      )}
 
       <Box display="flex" flexDirection="column" gap="12">
         <Text fontSize="sm" fontWeight="500">
@@ -130,10 +169,22 @@ export function SettingsPanel({
         )}
       </Box>
 
-      <Group justifyContent="space-between" alignItems="center" gap="8">
-        <Text fontSize="sm" color="fg.tertiary">
-          Branch Hop {version}. Favorites and history stay in this browser.
-        </Text>
+      <Text fontSize="sm" color="fg.tertiary">
+        Branch Hop {version}. Favorites and history stay in this browser.
+      </Text>
+      <Group gap="8">
+        <Button
+          appearance="default"
+          size="sm"
+          onClick={() =>
+            void send<UpdateInfo | null>({ type: "check-update" }).then(
+              (info) => toaster.create(info ? `Branch Hop ${info.latest} is ready. See the notice at the top.` : "You have the newest version."),
+              () => toaster.create("Couldn't check for updates", { intent: "danger" }),
+            )
+          }
+        >
+          Check for updates
+        </Button>
         <Button
           appearance="default"
           size="sm"

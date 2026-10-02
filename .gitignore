@@ -3,3 +3,6 @@ dist/
 release/
 .DS_Store
 *.pem
+safari/build/
+xcuserdata/
+*.xcuserstate

@@ -6,29 +6,30 @@
   const now = Date.now();
   const min = 60e3;
   const iso = (ms) => new Date(ms).toISOString();
-  const repo = "https://github.com/davidoliversteinberg/branch-hop-shared/issues/";
+  const repo = "https://github.com/episerver/branch-hop-shared/issues/";
   const me = { login: "davidoliversteinberg", name: "David Steinberg" };
   const ghMode = params.get("gh") ?? "signedin";
 
+  const people = [me, { login: "alex-designer", name: "Alex Rivera" }, { login: "sam-pm" }];
   const shared = {
     status: "ok",
     fetchedAt: now - 30e3,
-    people: [me, { login: "alex-designer", name: "Alex Rivera" }, { login: "sam-pm" }],
-    lists: [
-      { name: "Opal review", color: "197A94" },
-      { name: "STRIDE templates", color: "7C3AED" },
+    installedOn: ["episerver", me.login],
+    spaces: [
+      { owner: "episerver", org: true, status: "ok", people, lists: [{ name: "Opal review", color: "197A94" }, { name: "STRIDE templates", color: "7C3AED" }] },
+      { owner: me.login, org: false, status: "ok", people: [me], lists: [] },
     ],
     items: [
-      { number: 3, key: "meridian-brand-template", route: "/site/meridian", note: "Meridian review on Friday. Check the hero on mobile.", lists: ["STRIDE templates"], sharedWith: [me.login], sharedBy: "alex-designer", comments: 2, createdAt: iso(now - 26 * 60 * min), updatedAt: iso(now - 20 * min), url: repo + 3 },
-      { number: 5, key: "experiment-template-ca-3893ad", name: "experiment/template-card-with-description2", route: "/analytics", note: "Cohort chart is ready for a look", lists: [], sharedWith: [me.login], sharedBy: "sam-pm", comments: 0, createdAt: iso(now - 4 * 60 * min), updatedAt: iso(now - 3 * 60 * min), url: repo + 5 },
-      { number: 2, key: "david-vision-template", name: "david/vision-template", route: "/site/vision", note: "Photography-led Brand Portal for STRIDE", lists: ["STRIDE templates"], sharedWith: ["alex-designer"], sharedBy: me.login, comments: 4, createdAt: iso(now - 3 * 1440 * min), updatedAt: iso(now - 1440 * min), url: repo + 2 },
-      { number: 1, key: "main", route: "/opal/image-gen?artifact=optimizely-hype-to-hero", note: "Baseline for the image gen review", lists: ["Opal review"], sharedWith: [], sharedBy: me.login, comments: 0, createdAt: iso(now - 4 * 1440 * min), updatedAt: iso(now - 2 * 1440 * min), url: repo + 1 },
+      { space: "episerver", number: 3, key: "meridian-brand-template", route: "/site/meridian", note: "Meridian review on Friday. Check the hero on mobile.", lists: ["STRIDE templates"], sharedWith: [me.login], sharedBy: "alex-designer", comments: 2, createdAt: iso(now - 26 * 60 * min), updatedAt: iso(now - 20 * min), url: repo + 3 },
+      { space: "episerver", number: 5, key: "experiment-template-ca-3893ad", name: "experiment/template-card-with-description2", route: "/analytics", note: "Cohort chart is ready for a look", lists: [], sharedWith: [me.login], sharedBy: "sam-pm", comments: 0, createdAt: iso(now - 4 * 60 * min), updatedAt: iso(now - 3 * 60 * min), url: repo + 5 },
+      { space: "episerver", number: 2, key: "david-vision-template", name: "david/vision-template", route: "/site/vision", note: "Photography-led Brand Portal for STRIDE", lists: ["STRIDE templates"], sharedWith: ["alex-designer"], sharedBy: me.login, comments: 4, createdAt: iso(now - 3 * 1440 * min), updatedAt: iso(now - 1440 * min), url: repo + 2 },
+      { space: "episerver", number: 1, key: "main", route: "/opal/image-gen?artifact=optimizely-hype-to-hero", note: "Baseline for the image gen review", lists: ["Opal review"], sharedWith: [], sharedBy: me.login, comments: 0, createdAt: iso(now - 4 * 1440 * min), updatedAt: iso(now - 2 * 1440 * min), url: repo + 1 },
     ],
   };
   const comments = {
     3: [
-      { id: 11, issue: 3, author: "alex-designer", body: "Pushed a new hero crop. Can you check it on mobile?", createdAt: iso(now - 50 * min), updatedAt: iso(now - 50 * min), url: repo + "3#issuecomment-11" },
-      { id: 12, issue: 3, author: me.login, body: "Looks good. The CTA wraps at 375px, though.", createdAt: iso(now - 30 * min), updatedAt: iso(now - 30 * min), url: repo + "3#issuecomment-12" },
+      { id: 11, space: "episerver", issue: 3, author: "alex-designer", body: "Pushed a new hero crop. Can you check it on mobile?", createdAt: iso(now - 50 * min), updatedAt: iso(now - 50 * min), url: repo + "3#issuecomment-11" },
+      { id: 12, space: "episerver", issue: 3, author: me.login, body: "Looks good. The CTA wraps at 375px, though.", createdAt: iso(now - 30 * min), updatedAt: iso(now - 30 * min), url: repo + "3#issuecomment-12" },
     ],
   };
   const auth =
@@ -53,8 +54,9 @@
             { key: "main", route: "/opal/image-gen?artifact=optimizely-hype-to-hero", at: now - 64 * min },
             { key: "research-brief-platform", route: "/research", at: now - 5 * 60 * min },
           ],
+          ...(params.has("update") ? { update: { latest: "0.3.1", current: "0.3.0", url: "https://github.com/davidoliversteinberg/branch-hop/releases/tag/v0.3.1", checkedAt: now } } : {}),
           names: { "david-image-gen-editor": "david/image-gen-editor", "david-vision-template": "david/vision-template" },
-          ...(ghMode === "signedin" ? { "gh:shared": shared, "gh:unread": { 3: { shared: true, comments: 1 }, 5: { shared: true } } } : {}),
+          ...(ghMode === "signedin" ? { "gh:shared": shared, "gh:unread": { "episerver#3": { shared: true, comments: 1 }, "episerver#5": { shared: true } } } : {}),
         },
         session: { "tab:1": { key: "david-image-gen-editor", route: "/opal/image-gen?artifact=optimizely-hype-to-hero", prevKey: "meridian-brand-template" }, "gh:auth": auth },
       };
@@ -96,13 +98,15 @@
         return null;
       case "sync":
         return shared;
+      case "check-update":
+        return null;
       case "mark-read":
         await areas.local.set({ "gh:unread": {} });
         return null;
       case "comments":
         return comments[req.issue] ?? [];
       case "comment":
-        return { id: Date.now(), issue: req.issue, author: me.login, body: req.body, createdAt: iso(Date.now()), updatedAt: iso(Date.now()), url: repo + req.issue };
+        return { id: Date.now(), space: req.space, issue: req.issue, author: me.login, body: req.body, createdAt: iso(Date.now()), updatedAt: iso(Date.now()), url: repo + req.issue };
       default:
         return null;
     }
@@ -122,7 +126,7 @@
     notifications: { create: () => undefined },
     runtime: {
       id: "harness",
-      getManifest: () => ({ version: "0.2.0" }),
+      getManifest: () => ({ version: "0.3.0" }),
       getURL: (p) => `chrome-extension://harness/${p}`,
       sendMessage: async (req) => {
         try {

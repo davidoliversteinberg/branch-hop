@@ -1,16 +1,22 @@
 import { BRANCH_NAME_RE, KEY_RE, isSafeRoute, previewUrl } from "./preview.ts";
 
-/** Branch Hop's GitHub App and the private repo where shared branches live. The Client ID is public. */
+/** Branch Hop's GitHub App. The Client ID is public. */
 export const GITHUB = {
   clientId: "Iv23liBiCKXLbNx8C3dL",
-  owner: "davidoliversteinberg",
-  repo: "branch-hop-shared",
   api: "https://api.github.com",
   web: "https://github.com",
 } as const;
 
+/**
+ * A shared space is a repo with exactly this name, under a person or an organization
+ * (for example episerver/branch-hop-shared). Branch Hop never touches any other repo.
+ */
+export const SHARED_REPO_NAME = "branch-hop-shared";
+/** Shown in help text when nobody has set up a space yet. */
+export const PERSONAL_SPACE_EXAMPLE = "davidoliversteinberg";
+
 export const GITHUB_ORIGINS = ["https://github.com/*", "https://api.github.com/*"];
-export const SHARED_REPO_URL = `${GITHUB.web}/${GITHUB.owner}/${GITHUB.repo}`;
+export const spaceUrl = (owner: string) => `${GITHUB.web}/${owner}/${SHARED_REPO_NAME}`;
 
 export const LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 export const LIST_PREFIX = "list:";
@@ -18,10 +24,13 @@ export const LIST_NAME_MAX = 40;
 export const SHARED_NOTE_MAX = 500;
 export const COMMENT_MAX = 4000;
 const LIST_NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N} _.&'-]{0,39}$/u;
-const ISSUE_URL_PREFIX = `${SHARED_REPO_URL}/issues/`;
+const issuePrefix = (owner: string) => `${spaceUrl(owner)}/issues/`;
+/** Unread state and list IDs need both the space and the issue number. */
+export const issueId = (space: string, issue: number) => `${space}#${issue}`;
 
 export type Person = { login: string; name?: string; avatarUrl?: string };
 export type SharedBranch = {
+  space: string;
   number: number;
   key: string;
   name?: string;
@@ -35,7 +44,7 @@ export type SharedBranch = {
   updatedAt: string;
   url: string;
 };
-export type IssueComment = { id: number; issue: number; author: string; avatarUrl?: string; body: string; createdAt: string; updatedAt: string; url: string };
+export type IssueComment = { id: number; space: string; issue: number; author: string; avatarUrl?: string; body: string; createdAt: string; updatedAt: string; url: string };
 export type SharedList = { name: string; color: string };
 
 /* Small validators for data that comes back from GitHub or storage */
@@ -96,16 +105,17 @@ export function parseIssueBody(body: unknown): { key: string; name?: string; rou
 }
 
 /** Turns a GitHub issue into a shared branch, or null if it isn't one of ours. */
-export function parseIssue(raw: unknown): SharedBranch | null {
+export function parseIssue(raw: unknown, space: string): SharedBranch | null {
   const o = obj(raw);
   if (!o || o.pull_request || o.state !== "open" || !isInt(o.number)) return null;
-  const url = typeof o.html_url === "string" && o.html_url === `${ISSUE_URL_PREFIX}${o.number}` ? o.html_url : null;
+  const url = typeof o.html_url === "string" && o.html_url === `${issuePrefix(space)}${o.number}` ? o.html_url : null;
   const parsed = parseIssueBody(o.body);
   const sharedBy = login(obj(o.user)?.login);
   if (!url || !parsed || !sharedBy || !isIso(o.created_at) || !isIso(o.updated_at)) return null;
   const sharedWith = (Array.isArray(o.assignees) ? o.assignees : []).map((a) => login(obj(a)?.login)).filter((l): l is string => l !== null);
   const lists = (Array.isArray(o.labels) ? o.labels : []).map((l) => listFromLabel(obj(l)?.name)).filter((l): l is string => l !== null);
   return {
+    space,
     number: o.number,
     ...parsed,
     lists: [...new Set(lists)],
@@ -118,12 +128,13 @@ export function parseIssue(raw: unknown): SharedBranch | null {
   };
 }
 
-/** One entry per branch: if the same branch was shared twice, the most recently updated wins. */
+/** One entry per branch in each space: if a branch was shared twice there, the most recently updated wins. */
 export function dedupeShared(items: SharedBranch[]): SharedBranch[] {
   const byKey = new Map<string, SharedBranch>();
   for (const item of items) {
-    const prev = byKey.get(item.key);
-    if (!prev || Date.parse(item.updatedAt) > Date.parse(prev.updatedAt)) byKey.set(item.key, item);
+    const k = `${item.space}:${item.key}`;
+    const prev = byKey.get(k);
+    if (!prev || Date.parse(item.updatedAt) > Date.parse(prev.updatedAt)) byKey.set(k, item);
   }
   return [...byKey.values()].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
@@ -134,10 +145,12 @@ export function parseComment(raw: unknown): IssueComment | null {
   const author = login(obj(o.user)?.login);
   const issueUrl = typeof o.issue_url === "string" ? o.issue_url : "";
   const issueMatch = /\/repos\/([^/]+)\/([^/]+)\/issues\/(\d+)$/.exec(issueUrl);
-  if (!author || !issueMatch || issueMatch[1] !== GITHUB.owner || issueMatch[2] !== GITHUB.repo) return null;
+  if (!author || !issueMatch || !LOGIN_RE.test(issueMatch[1]) || issueMatch[2] !== SHARED_REPO_NAME) return null;
+  const space = issueMatch[1];
   const issue = Number(issueMatch[3]);
-  const url = typeof o.html_url === "string" && o.html_url.startsWith(`${ISSUE_URL_PREFIX}${issue}#issuecomment-`) ? o.html_url : `${ISSUE_URL_PREFIX}${issue}`;
-  return { id: o.id, issue, author, avatarUrl: avatar(obj(o.user)?.avatar_url), body: o.body.slice(0, COMMENT_MAX), createdAt: o.created_at, updatedAt: o.updated_at, url };
+  const prefix = issuePrefix(space);
+  const url = typeof o.html_url === "string" && o.html_url.startsWith(`${prefix}${issue}#issuecomment-`) ? o.html_url : `${prefix}${issue}`;
+  return { id: o.id, space, issue, author, avatarUrl: avatar(obj(o.user)?.avatar_url), body: o.body.slice(0, COMMENT_MAX), createdAt: o.created_at, updatedAt: o.updated_at, url };
 }
 
 export function parsePerson(raw: unknown): Person | null {
@@ -148,10 +161,16 @@ export function parsePerson(raw: unknown): Person | null {
   return { login: l, name, avatarUrl: avatar(o.avatar_url) };
 }
 
-/** Issue links we open from notifications must point at the shared repo. */
+/** Issue links we open must point at a branch-hop-shared repo on github.com. */
 export function isSharedIssueUrl(url: unknown): url is string {
-  if (typeof url !== "string" || !url.startsWith(ISSUE_URL_PREFIX)) return false;
-  return /^\d+(#issuecomment-\d+)?$/.test(url.slice(ISSUE_URL_PREFIX.length));
+  if (typeof url !== "string") return false;
+  const m = /^https:\/\/github\.com\/([A-Za-z0-9-]{1,39})\/branch-hop-shared\/issues\/\d+(#issuecomment-\d+)?$/.exec(url);
+  return !!m && LOGIN_RE.test(m[1]);
+}
+
+/** GitHub's single sign-on page for an organization, as sent in the X-GitHub-SSO header. */
+export function isSsoUrl(url: unknown): url is string {
+  return typeof url === "string" && /^https:\/\/github\.com\/orgs\/[A-Za-z0-9-]{1,39}\/sso(\?[A-Za-z0-9_=&%.-]*)?$/.test(url);
 }
 
 /* Notification events, worked out by comparing what's shared now with what was seen last time */

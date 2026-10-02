@@ -37,12 +37,18 @@ Change shortcuts at `chrome://extensions/shortcuts`.
 
 No store and no IT request needed.
 
-1. Download `branch-hop-<version>.zip` from the latest release and unzip it somewhere permanent, such as `Documents/Branch Hop`. The browser loads the extension from that folder, so don't delete it.
+1. Open **Terminal**, paste this, and press Return. It puts the newest Branch Hop in `Documents/Branch Hop`:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/davidoliversteinberg/branch-hop/main/scripts/install.sh | bash
+   ```
+
+   No Terminal? Download `branch-hop-<version>.zip` from the latest release and unzip it into a folder you'll keep.
 2. Open `chrome://extensions` (in Brave, `brave://extensions`) and turn on **Developer mode**.
-3. Click **Load unpacked** and choose the unzipped folder.
+3. Click **Load unpacked** and choose the `Documents/Branch Hop` folder.
 4. Pin Branch Hop from the puzzle-piece menu in the toolbar.
 
-**Updating:** replace the folder's contents with the new release, then click the reload arrow on the Branch Hop card. Favorites, settings and your GitHub sign-in stay, because the extension ID is fixed (`cikpnfefgjppclpmndpcalonhgdanado`).
+**Updating:** Branch Hop checks for new versions on its own. When one is out, its icon shows ↑ and the popup offers **Update**: run the same command again, and Branch Hop reloads itself within a minute. Favorites, settings and your GitHub sign-in stay, because the extension ID is fixed (`cikpnfefgjppclpmndpcalonhgdanado`).
 
 Chrome may remind you now and then that developer-mode extensions are on. That's expected for extensions installed this way.
 
@@ -56,24 +62,23 @@ Chrome may remind you now and then that developer-mode extensions are on. That's
 
 You stay signed in. Branch Hop renews its access in the background, and you'd only sign in again if you sign out, revoke the app on GitHub, or don't use it for six months.
 
-## Add a teammate
+## Shared spaces
 
-Invite them as a collaborator on two private repos:
+Shared branches live in a GitHub repo named `branch-hop-shared`. Branch Hop finds every one it can reach after you sign in, and shows them together:
 
-- `davidoliversteinberg/branch-hop`, so they can download releases
-- `davidoliversteinberg/branch-hop-shared`, so they can see and share branches
+- **A team space**, such as `episerver/branch-hop-shared`. It's an internal repo, so everyone in the organization can see it and nobody needs inviting.
+- **A personal space**, such as `davidoliversteinberg/branch-hop-shared`, for people you invite as collaborators.
 
-Then they install the extension and sign in. Nobody else has to approve anything. The one-time app setup is in [docs/github-app.md](docs/github-app.md).
+When you share, you pick the space. Settings lists each space and whether it's working. If an organization uses single sign-on, Branch Hop shows a **Sign in with SSO** button instead of failing quietly. App setup and the one-time organization approval are in [docs/github-app.md](docs/github-app.md).
 
 ## Install in Safari
 
-Safari runs the same extension, wrapped in a small Mac app. This needs Xcode, and these steps haven't been run yet.
+Safari runs the same extension, wrapped in a small Mac app. Building it needs Xcode.
 
 1. Install Xcode from the Mac App Store and open it once.
-2. Build the extension: `npm install && npm run build`.
-3. Create the Safari app: `xcrun safari-web-extension-converter dist --app-name "Branch Hop" --macos-only`. Xcode opens the new project.
-4. In Xcode, press **Run**. Then in Safari open **Settings › Extensions**, turn on Branch Hop, and allow it on Axiom Play sites and github.com.
-5. Local builds are unsigned. Turn on **Settings › Advanced › Show features for web developers**, then **Developer › Allow unsigned extensions**. Safari resets this when it quits.
+2. In this repo, run `npm install && npm run safari`. It builds the app, puts it in your Applications folder and opens it once.
+3. In Safari, turn on **Settings › Advanced › Show features for web developers**, then **Developer › Allow unsigned extensions**. Safari resets this when it quits, until Branch Hop is signed through the App Store.
+4. In **Settings › Extensions**, turn on Branch Hop and allow it on `vercel.app`, `github.com` and `api.github.com`.
 
 Safari extensions can't show desktop notifications, so in Safari the count on the toolbar icon is the alert.
 

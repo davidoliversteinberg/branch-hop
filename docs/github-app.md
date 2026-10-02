@@ -1,6 +1,6 @@
 # GitHub sign-in setup
 
-Shared lists, comments and notifications use a GitHub App owned by the Branch Hop maintainer. It works without any company approval, because the app is only installed on one private repo, `branch-hop-shared`.
+Shared lists, comments and notifications use a GitHub App owned by the Branch Hop maintainer. A shared space is any repo named `branch-hop-shared` that the app is installed on: a personal one needs no approval, and an organization's needs one approval from an org owner.
 
 Each shared branch is stored as an issue in that repo. The title is the branch, labels are lists, assignees are the people it's shared with, and comments are the conversation. GitHub's own notifications work on top of that.
 
@@ -20,7 +20,7 @@ Open <https://github.com/settings/apps/new> and fill in the form.
 | Repository permissions › Issues | Read and write |
 | Repository permissions › Metadata | Read-only (selected automatically) |
 | Every other permission | No access |
-| Where can this GitHub App be installed? | Only on this account |
+| Where can this GitHub App be installed? | Any account (so organizations can install it; it still isn't listed anywhere) |
 
 Click **Create GitHub App**. Don't generate a client secret or a private key. Device sign-in doesn't use them, so there's no secret to look after.
 
@@ -32,7 +32,13 @@ On the app's page, open **Install App**, click **Install**, choose **Only select
 
 The app's Client ID (it starts with `Iv`) is public. It's set as `GITHUB.clientId` in `src/shared/github.ts`, along with the shared repo's owner and name. This is already done for the current app.
 
-## Adding teammates
+## Set up a team space in an organization
+
+1. Create an **internal** repo named `branch-hop-shared` in the organization. Internal means every member can see it, so nobody needs inviting. (Done for `episerver`.)
+2. Open the app's public install page, `https://github.com/apps/branch-hop/installations/new`, choose the organization, pick **Only select repositories** › `branch-hop-shared`, and submit. If you aren't an owner, GitHub sends the owners a request instead.
+3. Once an owner approves, everyone in the organization sees the team space in Branch Hop after signing in.
+
+## Adding teammates to a personal space
 
 Invite each person as a collaborator on two repos:
 

@@ -1,8 +1,8 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Avatar, Box, Button, Checkbox, Field, Group, Input, Switch, Text, Textarea, toaster } from "@optiaxiom/react";
+import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Avatar, Box, Button, Checkbox, Field, Group, Input, SegmentedControl, SegmentedControlItem, Switch, Text, Textarea, toaster } from "@optiaxiom/react";
 import { IconArrowUpRightFromSquare, IconChevronLeft } from "@optiaxiom/icons";
-import { COMMENT_MAX, SHARED_NOTE_MAX, SHARED_REPO_URL, cleanListName, isSharedIssueUrl, type IssueComment, type Person, type SharedBranch, type SharedList } from "../shared/github.ts";
-import type { AuthStatus, SharedState } from "../shared/messages.ts";
+import { COMMENT_MAX, SHARED_NOTE_MAX, SHARED_REPO_NAME, cleanListName, isSharedIssueUrl, isSsoUrl, spaceUrl, type IssueComment, type SharedBranch } from "../shared/github.ts";
+import type { AuthStatus, SharedState, Space } from "../shared/messages.ts";
 import { setMuted } from "../shared/store";
 import { ago } from "./items";
 import { send } from "./useGitHub";
@@ -36,7 +36,7 @@ export function SignInCard({ auth, onSignIn }: { auth: AuthStatus; onSignIn: () 
       <Box px="16" py="16" display="flex" flexDirection="column" gap="12">
         <Text fontWeight="500">Approve Branch Hop on GitHub</Text>
         <Text fontSize="sm" color="fg.secondary">
-          Copy this code, then paste it on the GitHub page that opens. Branch Hop finishes signing in on its own.
+          Copy this code and paste it on GitHub's Device activation page. If GitHub asks you to sign in first, do that, then paste the code. Branch Hop finishes signing in on its own.
         </Text>
         <Text fontFamily="mono" fontSize="2xl" fontWeight="500" aria-label={`Sign-in code ${auth.userCode.split("").join(" ")}`}>
           {auth.userCode}
@@ -85,15 +85,22 @@ export function SignInCard({ auth, onSignIn }: { auth: AuthStatus; onSignIn: () 
   );
 }
 
-/* When the shared repo can't be read */
+/* When no shared space can be read */
 export function AccessCard({ shared, onRetry }: { shared: SharedState; onRetry: () => void }) {
+  const sso = shared.spaces.find((sp) => sp.status === "sso");
+  const installed = shared.installedOn.length ? shared.installedOn.map((a) => `@${a}`).join(", ") : "nowhere yet";
   const copy: Record<string, [string, string]> = {
-    "no-access": ["You can't see the shared lists yet", "Ask whoever set up Branch Hop to add you as a collaborator on the branch-hop-shared repo. If that's you, check the Branch Hop app is installed on that repo."],
-    "no-permission": ["Branch Hop's GitHub App is missing a permission", "In the app's settings on GitHub, set Issues to Read and write, then accept the change for branch-hop-shared."],
+    "no-space": [
+      "No shared space yet",
+      `Shared branches live in a GitHub repo called ${SHARED_REPO_NAME}, in your team's organization or your own account. The Branch Hop app is installed on: ${installed}. Ask your team's GitHub owner to install it on that repo, or create one and install the app there.`,
+    ],
+    "no-access": ["You can't see the shared space yet", `Ask whoever set up Branch Hop to add you to the ${SHARED_REPO_NAME} repo, or to install the Branch Hop app on it.`],
+    "no-permission": ["Branch Hop's GitHub App is missing a permission", `In the app's settings on GitHub, set Issues to Read and write, then accept the change for ${SHARED_REPO_NAME}.`],
+    sso: ["Single sign-on needed", "Your organization asks you to sign in with its single sign-on before Branch Hop can see the shared space."],
     "rate-limited": ["GitHub needs a short break", "GitHub's rate limit was reached. Branch Hop will try again in a few minutes."],
     offline: ["Branch Hop can't reach GitHub", shared.message ?? "Check your connection and try again."],
   };
-  const [title, body] = copy[shared.status] ?? copy.offline;
+  const [title, body] = copy[sso ? "sso" : shared.status] ?? copy.offline;
   return (
     <Box px="16" py="16" display="flex" flexDirection="column" gap="8" alignItems="start">
       <Text fontWeight="500">{title}</Text>
@@ -101,37 +108,95 @@ export function AccessCard({ shared, onRetry }: { shared: SharedState; onRetry: 
         {body}
       </Text>
       <Group gap="8" pt="4">
+        {sso?.ssoUrl && isSsoUrl(sso.ssoUrl) && (
+          <Button appearance="primary" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => void chrome.tabs.create({ url: sso.ssoUrl })}>
+            Sign in with SSO
+          </Button>
+        )}
         <Button appearance="default" onClick={onRetry}>
           Try again
         </Button>
-        {shared.status === "no-access" && (
-          <Button appearance="subtle" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => void chrome.tabs.create({ url: SHARED_REPO_URL })}>
-            Open the repo
-          </Button>
-        )}
       </Group>
     </Box>
+  );
+}
+
+/** A slim notice above the list when one space needs single sign-on but others work. */
+export function SsoNotice({ space }: { space: Space }) {
+  if (!space.ssoUrl || !isSsoUrl(space.ssoUrl)) return null;
+  return (
+    <Group justifyContent="space-between" alignItems="center" gap="8" px="8" pb="4">
+      <Text fontSize="sm" color="fg.warning.strong">
+        {space.owner} needs single sign-on
+      </Text>
+      <Button appearance="subtle" size="sm" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => void chrome.tabs.create({ url: space.ssoUrl })}>
+        Sign in
+      </Button>
+    </Group>
   );
 }
 
 /* Share a branch with people and lists */
 export type ShareTarget = { key: string; name?: string; title: string; route: string; note?: string };
 
-export function SharePanel({
+export function SharePanel({ target, spaces, items, me, onClose }: { target: ShareTarget; spaces: Space[]; items: SharedBranch[]; me: string; onClose: () => void }) {
+  const usable = spaces.filter((sp) => sp.status === "ok");
+  const already = usable.find((sp) => items.some((i) => i.space === sp.owner && i.key === target.key));
+  const [owner, setOwner] = useState((already ?? usable[0])?.owner ?? "");
+  const space = usable.find((sp) => sp.owner === owner);
+  if (!space) {
+    return (
+      <Box px="16" py="16" display="flex" flexDirection="column" gap="8" alignItems="start">
+        <Text fontWeight="500">No shared space to share into</Text>
+        <Text fontSize="sm" color="fg.secondary">
+          Open the Shared tab to see what Branch Hop can reach.
+        </Text>
+        <Button appearance="default" onClick={onClose}>
+          Back
+        </Button>
+      </Box>
+    );
+  }
+  return (
+    <ShareForm
+      key={space.owner}
+      target={target}
+      space={space}
+      existing={items.find((i) => i.space === space.owner && i.key === target.key)}
+      me={me}
+      onClose={onClose}
+      picker={
+        usable.length > 1 ? (
+          <SegmentedControl type="single" value={owner} aria-label="Share in" onValueChange={(v: string) => v && setOwner(v)}>
+            {usable.map((sp) => (
+              <SegmentedControlItem key={sp.owner} value={sp.owner} style={{ flex: 1 }}>
+                {sp.org ? sp.owner : `${sp.owner} (you)`}
+              </SegmentedControlItem>
+            ))}
+          </SegmentedControl>
+        ) : null
+      }
+    />
+  );
+}
+
+function ShareForm({
   target,
+  space,
   existing,
-  people,
-  lists,
   me,
   onClose,
+  picker,
 }: {
   target: ShareTarget;
+  space: Space;
   existing?: SharedBranch;
-  people: Person[];
-  lists: SharedList[];
   me: string;
   onClose: () => void;
+  picker: ReactNode;
 }) {
+  const people = space.people;
+  const lists = space.lists;
   const others = useMemo(() => people.filter((p) => p.login !== me), [people, me]);
   const already = useMemo(() => new Set(existing?.sharedWith ?? []), [existing]);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
@@ -159,6 +224,7 @@ export function SharePanel({
     try {
       await send({
         type: "share",
+        space: space.owner,
         key: target.key,
         name: target.name,
         route: target.route,
@@ -180,7 +246,7 @@ export function SharePanel({
     if (!existing) return;
     setBusy(true);
     try {
-      await send({ type: "unshare", issue: existing.number });
+      await send({ type: "unshare", space: space.owner, issue: existing.number });
       toaster.create(`Stopped sharing ${target.title}`);
       onClose();
     } catch (err) {
@@ -202,6 +268,8 @@ export function SharePanel({
           </Button>
         </Group>
 
+        {picker}
+
         <Box display="flex" flexDirection="column" gap="8">
           <Text fontSize="sm" fontWeight="500">
             People
@@ -209,10 +277,10 @@ export function SharePanel({
           {others.length === 0 ? (
             <>
               <Text fontSize="sm" color="fg.secondary">
-                Nobody else has access yet. Add teammates as collaborators on branch-hop-shared and they'll show up here.
+                Nobody else can see this space yet. Add teammates to {space.owner}/{SHARED_REPO_NAME} and they'll show up here.
               </Text>
               <Box>
-                <Button appearance="default" size="sm" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => void chrome.tabs.create({ url: `${SHARED_REPO_URL}/settings/access` })}>
+                <Button appearance="default" size="sm" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => void chrome.tabs.create({ url: `${spaceUrl(space.owner)}/settings/access` })}>
                   Add collaborators
                 </Button>
               </Box>
@@ -285,8 +353,8 @@ export function CommentsPanel({ shared, title, me, muted, onClose }: { shared: S
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    send<IssueComment[]>({ type: "comments", issue: shared.number }).then(setComments, (err) => setError(errorText(err)));
-  }, [shared.number]);
+    send<IssueComment[]>({ type: "comments", space: shared.space, issue: shared.number }).then(setComments, (err) => setError(errorText(err)));
+  }, [shared.space, shared.number]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -298,7 +366,7 @@ export function CommentsPanel({ shared, title, me, muted, onClose }: { shared: S
     if (!body || busy) return;
     setBusy(true);
     try {
-      const comment = await send<IssueComment>({ type: "comment", issue: shared.number, body });
+      const comment = await send<IssueComment>({ type: "comment", space: shared.space, issue: shared.number, body });
       setComments((list) => [...(list ?? []), comment]);
       setDraft("");
     } catch (err) {

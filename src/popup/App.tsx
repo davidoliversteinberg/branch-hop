@@ -29,14 +29,15 @@ import { openPreview } from "../shared/nav";
 import { branchColor } from "../shared/palette";
 import { previewUrl } from "../shared/preview";
 import { NOTE_MAX, rememberName, removeFavorite, saveFavorite, setSetting } from "../shared/store";
-import { AccessCard, CommentsPanel, SharePanel, SignInCard, type ShareTarget } from "./GitHubPanels";
+import { AccessCard, CommentsPanel, SharePanel, SignInCard, SsoNotice, type ShareTarget } from "./GitHubPanels";
+import { UpdateNotice } from "./UpdateNotice";
 import { ago, buildGroups, type Item, type View } from "./items";
 import { SettingsPanel } from "./SettingsPanel";
 import { useExtensionState, useShortcuts } from "./useExtensionState";
 import { send, useGitHub } from "./useGitHub";
 import { useTyped } from "./useTyped";
 
-type Panel = null | { kind: "settings" } | { kind: "share"; target: ShareTarget } | { kind: "comments"; issue: number };
+type Panel = null | { kind: "settings" } | { kind: "share"; target: ShareTarget } | { kind: "comments"; space: string; issue: number };
 type NoteDraft = { key: string; name?: string; route?: string; title: string; value: string };
 
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -266,12 +267,12 @@ export function App() {
     );
   }
 
-  const commentsItem = panel?.kind === "comments" ? github.shared.items.find((s) => s.number === panel.issue) : undefined;
+  const commentsItem = panel?.kind === "comments" ? github.shared.items.find((s) => s.space === panel.space && s.number === panel.issue) : undefined;
   const showSharedGate = view === "shared" && !query.trim();
   const sharedBody =
     showSharedGate && !signedIn ? (
       <SignInCard auth={github.auth} onSignIn={signIn} />
-    ) : showSharedGate && github.shared.status !== "ok" && github.shared.status !== "signed-out" && github.shared.items.length === 0 ? (
+    ) : showSharedGate && github.shared.status !== "ok" && github.shared.status !== "signed-out" && github.shared.items.length === 0 && github.ready ? (
       <AccessCard shared={github.shared} onRetry={() => void github.refresh().catch(() => undefined)} />
     ) : null;
 
@@ -366,6 +367,7 @@ export function App() {
         <SettingsPanel
           ext={ext}
           auth={github.auth}
+          shared={github.shared}
           shortcuts={shortcuts}
           onSignIn={() => {
             setPanel(null);
@@ -374,14 +376,7 @@ export function App() {
           onDone={() => setPanel(null)}
         />
       ) : panel?.kind === "share" && me ? (
-        <SharePanel
-          target={panel.target}
-          existing={sharedOf(panel.target.key)}
-          people={github.shared.people}
-          lists={github.shared.lists}
-          me={me.login}
-          onClose={() => setPanel(null)}
-        />
+        <SharePanel target={panel.target} spaces={github.shared.spaces} items={github.shared.items} me={me.login} onClose={() => setPanel(null)} />
       ) : panel?.kind === "comments" && commentsItem && me ? (
         <CommentsPanel
           shared={commentsItem}
@@ -392,6 +387,7 @@ export function App() {
         />
       ) : (
         <>
+          <UpdateNotice />
           <Box px="16" pt="12" display="flex" flexDirection="column" gap="8">
             <SearchInput
               ref={searchRef}
@@ -442,6 +438,7 @@ export function App() {
 
           {sharedBody ?? (
             <Box px="8" py="8" overflow="auto" style={{ flex: "1 1 auto", minHeight: 160 }}>
+              {view === "shared" && signedIn && !query && github.shared.spaces.filter((sp) => sp.status === "sso").map((sp) => <SsoNotice key={sp.owner} space={sp} />)}
               {view === "shared" && signedIn && !query && (
                 <Group justifyContent="space-between" alignItems="center" px="8" pb="4">
                   <Text fontSize="sm" color={github.shared.status === "ok" ? "fg.tertiary" : "fg.warning.strong"}>
@@ -562,7 +559,7 @@ export function App() {
                       appearance="subtle"
                       aria-label={`Comments (${active.shared.comments})`}
                       icon={<IconComment />}
-                      onClick={() => active.shared && setPanel({ kind: "comments", issue: active.shared.number })}
+                      onClick={() => active.shared && setPanel({ kind: "comments", space: active.shared.space, issue: active.shared.number })}
                     />
                   </Tooltip>
                 ) : (
