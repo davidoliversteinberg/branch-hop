@@ -53,7 +53,6 @@ export type Sources = { ext: ExtState; shared: SharedBranch[]; me: string | null
 
 export function buildGroups({ ext, shared, me, seen }: Sources, view: View, query: string, typed: Typed | null): ItemGroup[] {
   const here = ext.active?.loc ?? null;
-  const visits = new Map(ext.recent.map((v) => [v.key, v]));
   const sharedByKey = new Map(shared.map((s) => [s.key, s]));
   const nameOf = (key: string) => ext.favorites.find((f) => f.key === key && f.name)?.name ?? ext.names[key] ?? sharedByKey.get(key)?.name;
   const favOf = (key: string, route: string) => findFavorite(ext.favorites, key, route);
@@ -67,10 +66,7 @@ export function buildGroups({ ext, shared, me, seen }: Sources, view: View, quer
   });
 
   // A favorite is a page: its note (or the branch) on top, the page underneath. It always opens that page.
-  const visitedHere = (f: Favorite) => {
-    const v = visits.get(f.key);
-    return v && isSamePage(f, v.key, v.route) ? v.at : undefined;
-  };
+  const visitedHere = (f: Favorite) => ext.recent.find((v) => isSamePage(f, v.key, v.route))?.at;
   const fromFavorite = (f: Favorite): Item => {
     const branch = nameOf(f.key) ?? f.key;
     const seen = visitedHere(f);
@@ -85,7 +81,14 @@ export function buildGroups({ ext, shared, me, seen }: Sources, view: View, quer
       time: seen ? ago(seen) : undefined,
     };
   };
-  const fromVisit = (v: Visit): Item => ({ ...base(v.key, v.route), id: `recent-${v.key}`, subtitle: favOf(v.key, v.route)?.note ?? routePath(v.route), route: v.route, time: ago(v.at) });
+  const fromVisit = (v: Visit): Item => ({
+    ...base(v.key, v.route),
+    id: `recent-${v.key}-${routePath(v.route)}`,
+    subtitle: favOf(v.key, v.route)?.note ?? routePath(v.route),
+    route: v.route,
+    current: !!here && isSamePage(v, here.key, here.route),
+    time: ago(v.at),
+  });
   const fromShared = (s: SharedBranch): Item => ({
     ...base(s.key, s.route),
     id: `shared-${s.space}-${s.number}`,
@@ -98,7 +101,10 @@ export function buildGroups({ ext, shared, me, seen }: Sources, view: View, quer
 
   const lastSeen = (f: Favorite) => visitedHere(f) ?? f.addedAt;
   const favorites = [...ext.favorites].sort((a, b) => lastSeen(b) - lastSeen(a)).map(fromFavorite);
-  const recent = ext.recent.filter((v) => v.key !== here?.key).map(fromVisit);
+  // Every page you've opened except the one you're on. The flip-back hint goes on the newest row of the last branch.
+  const recent = ext.recent.filter((v) => !(here && isSamePage(v, here.key, here.route))).map(fromVisit);
+  const flipRow = recent.find((i) => i.previous);
+  for (const i of recent) i.previous = i === flipRow;
 
   const q = query.trim().toLowerCase();
   if (!q) {

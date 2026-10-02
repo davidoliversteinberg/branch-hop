@@ -52,6 +52,7 @@
           recent: [
             { key: "david-image-gen-editor", route: "/opal/image-gen?artifact=optimizely-hype-to-hero", at: now - 2 * min },
             { key: "meridian-brand-template", route: "/site/meridian", at: now - 18 * min },
+            { key: "david-image-gen-editor", route: "/opal/brand-kit", at: now - 40 * min },
             { key: "main", route: "/opal/image-gen?artifact=optimizely-hype-to-hero", at: now - 64 * min },
             { key: "research-brief-platform", route: "/research", at: now - 5 * 60 * min },
           ],

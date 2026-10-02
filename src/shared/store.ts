@@ -25,7 +25,8 @@ export type Visit = { key: string; route: string; at: number };
 export type TabState = { key: string; route: string; prevKey?: string };
 
 export const DEFAULT_SETTINGS: Settings = {
-  keepRoute: true,
+  // Off: every row opens its own page. On: rows open the page you're on, on their branch.
+  keepRoute: false,
   tabLabels: true,
   pagePill: true,
   notifyShares: true,
@@ -33,7 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   desktopAlerts: true,
 };
 export const NOTE_MAX = 120;
-const RECENT_MAX = 40;
+const RECENT_MAX = 60;
 const FAVORITES_MAX = 200;
 const NAMES_MAX = 500;
 const FAV_PREFIX = "fav:";
@@ -141,7 +142,8 @@ export async function recordVisit(visit: Visit): Promise<void> {
   const clean = cleanVisit(visit);
   if (!clean) return;
   const recent = await getRecent();
-  await chrome.storage.local.set({ recent: [clean, ...recent.filter((v) => v.key !== clean.key)].slice(0, RECENT_MAX) });
+  // One entry per page, so every page you open shows up, even several on the same branch.
+  await chrome.storage.local.set({ recent: [clean, ...recent.filter((v) => !isSamePage(v, clean.key, clean.route))].slice(0, RECENT_MAX) });
 }
 
 export async function clearRecent(): Promise<void> {

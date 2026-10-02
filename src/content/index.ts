@@ -26,7 +26,7 @@ async function start(key: string): Promise<void> {
   let pillHost: HTMLElement | null = null;
   let pillRoot: ShadowRoot | null = null;
   let hintTimer = 0;
-  const notFound = isNotFound();
+  let notFound = isNotFound() === true;
 
   /* Tab title: "<branch> · <page title>" */
   function applyTitle(): void {
@@ -251,6 +251,11 @@ async function start(key: string): Promise<void> {
   }
 
   await refresh();
+  // Safari doesn't report the page's status, so ask the server once.
+  if (isNotFound() === null && (await checkNotFound())) {
+    notFound = true;
+    renderPill();
+  }
   new MutationObserver(() => {
     applyTitle();
     placeIcon();
@@ -260,7 +265,17 @@ async function start(key: string): Promise<void> {
   });
 }
 
-function isNotFound(): boolean {
+/** true or false when the browser reports the page's status, null when it doesn't. */
+function isNotFound(): boolean | null {
   const [nav] = performance.getEntriesByType("navigation") as (PerformanceNavigationTiming & { responseStatus?: number })[];
-  return nav?.responseStatus === 404;
+  return typeof nav?.responseStatus === "number" && nav.responseStatus > 0 ? nav.responseStatus === 404 : null;
+}
+
+async function checkNotFound(): Promise<boolean> {
+  try {
+    const res = await fetch(location.href, { method: "HEAD", cache: "no-store", redirect: "manual" });
+    return res.status === 404;
+  } catch {
+    return false;
+  }
 }

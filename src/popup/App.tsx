@@ -28,7 +28,7 @@ import type { Unread } from "../shared/messages.ts";
 import { openPreview } from "../shared/nav";
 import { branchColor } from "../shared/palette";
 import { previewUrl } from "../shared/preview";
-import { NOTE_MAX, findFavorite, rememberName, removeFavorite, saveFavorite, setSetting, type Favorite } from "../shared/store";
+import { NOTE_MAX, findFavorite, recordVisit, rememberName, removeFavorite, saveFavorite, setSetting, type Favorite } from "../shared/store";
 import { AccessCard, CommentsPanel, SharePanel, SignInCard, SsoNotice, type ShareTarget } from "./GitHubPanels";
 import { UpdateNotice } from "./UpdateNotice";
 import { ago, buildGroups, routePath, type Item, type View } from "./items";
@@ -139,6 +139,12 @@ export function App() {
   const onPreview = here !== null;
 
   useEffect(() => setHi(0), [query, view]);
+
+  // The page you're on always lands in Recent, even if the browser didn't report the visit.
+  const herePage = here ? `${here.key}${here.route}` : "";
+  useEffect(() => {
+    if (here) void recordVisit({ key: here.key, route: here.route, at: Date.now() }).catch(() => undefined);
+  }, [herePage]);
   useEffect(() => {
     if (activeIndex >= 0) document.getElementById(optionId(activeIndex))?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
@@ -287,7 +293,7 @@ export function App() {
       <Box px="16" py="12" borderB="1" borderColor="border.secondary" display="flex" flexDirection="column" gap="4">
         <Group justifyContent="space-between" alignItems="center">
           <Text fontSize="sm" color="fg.secondary">
-            This tab
+            {here ? "This page" : "This tab"}
           </Text>
           <Group gap="4" alignItems="center">
             {here && (
@@ -298,18 +304,6 @@ export function App() {
                   aria-label="Share this page"
                   icon={<IconShareNodes />}
                   onClick={() => startShare({ key: here.key, name: nameOf(here.key), title: currentTitle, route: here.route, note: currentFavorite?.note })}
-                />
-              </Tooltip>
-            )}
-            {here && (
-              <Tooltip content={currentFavorite ? "Remove this page from favorites" : "Add this page to favorites"}>
-                <Button
-                  appearance="subtle"
-                  size="sm"
-                  aria-label={currentFavorite ? "Remove this page from favorites" : "Add this page to favorites"}
-                  aria-pressed={!!currentFavorite}
-                  icon={<IconStar filled={!!currentFavorite} />}
-                  onClick={() => void toggleFavorite(currentTarget)}
                 />
               </Tooltip>
             )}
@@ -350,11 +344,24 @@ export function App() {
               {here.route}
             </Text>
             {!panel && (
-              <Box pt="8">
-                <Switch checked={ext.settings.keepRoute} onCheckedChange={(v) => void setSetting("keepRoute", v)}>
-                  Keep this route when switching
-                </Switch>
-              </Box>
+              <Group pt="8" gap="12" alignItems="center" justifyContent="space-between">
+                <Tooltip content={currentFavorite ? "Saved in Favorites. Click to remove." : "Keep this page in Favorites"}>
+                  <Button
+                    appearance={currentFavorite ? "subtle" : "default"}
+                    size="sm"
+                    aria-pressed={!!currentFavorite}
+                    icon={<IconStar filled={!!currentFavorite} />}
+                    onClick={() => void toggleFavorite(currentTarget)}
+                  >
+                    {currentFavorite ? "Saved" : "Save this page"}
+                  </Button>
+                </Tooltip>
+                <Tooltip content="On: Recent opens the page you're on, on the branch you pick. Favorites always open their own page.">
+                  <Switch checked={ext.settings.keepRoute} onCheckedChange={(v) => void setSetting("keepRoute", v)}>
+                    Keep route
+                  </Switch>
+                </Tooltip>
+              </Group>
             )}
           </>
         ) : (
@@ -624,7 +631,7 @@ function EmptyState({ query, view, canAddCurrent, onAddCurrent }: { query: strin
       ? ["No favorites yet", "Star a page to keep it here. Save as many pages from one branch as you like, and add a note so you remember what each is for."]
       : view === "shared"
         ? ["Nothing shared yet", "Share the page you're on with the share button at the top, or share any branch from Favorites or Recent."]
-        : ["Nothing opened yet", "Branches you open in this browser show up here."];
+        : ["Nothing opened yet", "Every preview page you open shows up here on its own, ready to save."];
   return (
     <Box px="8" py="16" display="flex" flexDirection="column" gap="8" alignItems="start">
       <Text fontWeight="500">{title}</Text>

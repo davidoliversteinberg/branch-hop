@@ -91,14 +91,20 @@ test("saveFavorite refuses a key that isn't a preview branch, or an unsafe page"
   await assert.rejects(store.saveFavorite({ key: "main", route: "//evil.example", addedAt: 0 }));
 });
 
-test("recent visits keep the newest first, without duplicates", async () => {
+test("recent keeps every page, newest first, one entry per page", async () => {
   await store.recordVisit({ key: "main", route: "/", at: 1 });
   await store.recordVisit({ key: "meridian-brand-template", route: "/site/meridian", at: 2 });
   await store.recordVisit({ key: "main", route: "/opal/image-gen", at: 3 });
+  await store.recordVisit({ key: "main", route: "/?tab=2", at: 4 });
   assert.deepEqual((await store.getRecent()).map((v) => [v.key, v.route]), [
+    ["main", "/?tab=2"],
     ["main", "/opal/image-gen"],
     ["meridian-brand-template", "/site/meridian"],
   ]);
+});
+
+test("keep route is off unless you turn it on", async () => {
+  assert.equal((await store.getSettings()).keepRoute, false);
 });
 
 test("settings fall back to defaults and ignore non-boolean values", async () => {
