@@ -137,7 +137,7 @@ export function SettingsPanel({
         <Text fontSize="sm" fontWeight="500">
           Tabs and pages
         </Text>
-        <Switch checked={s.keepRoute} onCheckedChange={(v) => void setSetting("keepRoute", v)} description="Open the same page on the branch you pick.">
+        <Switch checked={s.keepRoute} onCheckedChange={(v) => void setSetting("keepRoute", v)} description="Open the same page on the branch you pick. Favorites always open the page you saved.">
           Keep the route when switching
         </Switch>
         <Switch checked={s.tabLabels} onCheckedChange={(v) => void setSetting("tabLabels", v)} description="Puts the branch in tab titles and a coloured dot on the tab icon.">

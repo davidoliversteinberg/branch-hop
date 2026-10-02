@@ -1,7 +1,8 @@
 import { issueId, type SharedBranch } from "../shared/github.ts";
 import type { Unread } from "../shared/messages.ts";
 import type { PreviewStatus } from "../shared/nav";
-import type { Favorite, Visit } from "../shared/store";
+import { pagePath } from "../shared/preview";
+import { findFavorite, isSamePage, type Favorite, type Visit } from "../shared/store";
 import type { ExtState } from "./useExtensionState";
 
 export type View = "favorites" | "shared" | "recent";
@@ -15,9 +16,10 @@ export type Item = {
   title: string;
   subtitle: string;
   route?: string;
-  /** Always open this route (pasted links and shared branches), even with "keep route" on. */
+  /** Always open this route (favorite pages, pasted links and shared branches), even with "keep route" on. */
   exactRoute?: string;
-  favorite: boolean;
+  /** The saved favorite for this row's page, if there is one. */
+  favorite?: Favorite;
   current: boolean;
   previous: boolean;
   time?: string;
@@ -27,7 +29,7 @@ export type Item = {
 };
 export type ItemGroup = { id: string; label: string; items: Item[] };
 
-export const routePath = (route: string) => route.split(/[?#]/)[0] || "/";
+export const routePath = pagePath;
 
 export function ago(ts: number): string {
   const mins = Math.round((Date.now() - ts) / 60000);
@@ -51,26 +53,41 @@ export type Sources = { ext: ExtState; shared: SharedBranch[]; me: string | null
 
 export function buildGroups({ ext, shared, me, seen }: Sources, view: View, query: string, typed: Typed | null): ItemGroup[] {
   const here = ext.active?.loc ?? null;
-  const favs = new Map(ext.favorites.map((f) => [f.key, f]));
   const visits = new Map(ext.recent.map((v) => [v.key, v]));
   const sharedByKey = new Map(shared.map((s) => [s.key, s]));
-  const nameOf = (key: string) => favs.get(key)?.name ?? ext.names[key] ?? sharedByKey.get(key)?.name;
-  const base = (key: string) => ({
+  const nameOf = (key: string) => ext.favorites.find((f) => f.key === key && f.name)?.name ?? ext.names[key] ?? sharedByKey.get(key)?.name;
+  const favOf = (key: string, route: string) => findFavorite(ext.favorites, key, route);
+  const base = (key: string, route: string) => ({
     key,
     name: nameOf(key),
     title: nameOf(key) ?? key,
-    favorite: favs.has(key),
+    favorite: favOf(key, route),
     current: key === here?.key,
     previous: key === ext.prevKey,
   });
 
-  const fromFavorite = (f: Favorite): Item => {
+  // A favorite is a page: its note (or the branch) on top, the page underneath. It always opens that page.
+  const visitedHere = (f: Favorite) => {
     const v = visits.get(f.key);
-    return { ...base(f.key), id: `fav-${f.key}`, subtitle: f.note ?? (v ? routePath(v.route) : "Not opened yet"), route: v?.route ?? f.route, time: v ? ago(v.at) : undefined };
+    return v && isSamePage(f, v.key, v.route) ? v.at : undefined;
   };
-  const fromVisit = (v: Visit): Item => ({ ...base(v.key), id: `recent-${v.key}`, subtitle: favs.get(v.key)?.note ?? routePath(v.route), route: v.route, time: ago(v.at) });
+  const fromFavorite = (f: Favorite): Item => {
+    const branch = nameOf(f.key) ?? f.key;
+    const seen = visitedHere(f);
+    return {
+      ...base(f.key, f.route),
+      id: `fav-${f.id}`,
+      title: f.note ?? branch,
+      subtitle: f.note ? `${branch} · ${routePath(f.route)}` : routePath(f.route),
+      route: f.route,
+      exactRoute: f.route,
+      current: !!here && isSamePage(f, here.key, here.route),
+      time: seen ? ago(seen) : undefined,
+    };
+  };
+  const fromVisit = (v: Visit): Item => ({ ...base(v.key, v.route), id: `recent-${v.key}`, subtitle: favOf(v.key, v.route)?.note ?? routePath(v.route), route: v.route, time: ago(v.at) });
   const fromShared = (s: SharedBranch): Item => ({
-    ...base(s.key),
+    ...base(s.key, s.route),
     id: `shared-${s.space}-${s.number}`,
     subtitle: s.note ?? `Shared by @${s.sharedBy}`,
     exactRoute: s.route,
@@ -79,7 +96,7 @@ export function buildGroups({ ext, shared, me, seen }: Sources, view: View, quer
     unread: !!seen[issueId(s.space, s.number)],
   });
 
-  const lastSeen = (f: Favorite) => visits.get(f.key)?.at ?? f.addedAt;
+  const lastSeen = (f: Favorite) => visitedHere(f) ?? f.addedAt;
   const favorites = [...ext.favorites].sort((a, b) => lastSeen(b) - lastSeen(a)).map(fromFavorite);
   const recent = ext.recent.filter((v) => v.key !== here?.key).map(fromVisit);
 
@@ -95,18 +112,21 @@ export function buildGroups({ ext, shared, me, seen }: Sources, view: View, quer
     const hay = [item.title, item.key ?? "", item.subtitle, item.shared?.sharedBy ?? "", ...(item.shared?.lists ?? [])].join(" ").toLowerCase();
     return tokens.every((t) => hay.includes(t));
   };
+  // Each page shows once: a shared or recent row is hidden when that same page is already a favorite.
+  const pageOf = (i: Item) => `${i.key}|${routePath(i.exactRoute ?? i.route ?? "/")}`;
   const groups: ItemGroup[] = [{ id: "favorites", label: "Favorites", items: favorites.filter(matches) }];
-  const listed = new Set(groups[0].items.map((i) => i.key));
-  const sharedMatches = shared.map(fromShared).filter((i) => !listed.has(i.key) && matches(i));
+  const listed = new Set(groups[0].items.map(pageOf));
+  const sharedMatches = shared.map(fromShared).filter((i) => !listed.has(pageOf(i)) && matches(i));
   groups.push({ id: "shared", label: "Shared", items: sharedMatches });
-  for (const i of sharedMatches) listed.add(i.key);
-  groups.push({ id: "recent", label: "Recent", items: recent.filter((i) => !listed.has(i.key) && matches(i)) });
-  for (const i of groups[2].items) listed.add(i.key);
+  for (const i of sharedMatches) listed.add(pageOf(i));
+  groups.push({ id: "recent", label: "Recent", items: recent.filter((i) => !listed.has(pageOf(i)) && matches(i)) });
+  for (const i of groups[2].items) listed.add(pageOf(i));
+  const listedKeys = new Set(groups.flatMap((g) => g.items.map((i) => i.key)));
 
-  if (typed?.kind === "link" && !listed.has(typed.key)) {
-    groups.push({ id: "any", label: "Pasted link", items: [{ ...base(typed.key), id: "typed-link", subtitle: routePath(typed.route), exactRoute: typed.route }] });
-  } else if (typed?.kind === "name" && !(typed.key && listed.has(typed.key))) {
-    const known = typed.key ? base(typed.key) : { key: null, favorite: false, current: false, previous: false };
+  if (typed?.kind === "link" && !listed.has(`${typed.key}|${routePath(typed.route)}`)) {
+    groups.push({ id: "any", label: "Pasted link", items: [{ ...base(typed.key, typed.route), id: "typed-link", subtitle: routePath(typed.route), exactRoute: typed.route }] });
+  } else if (typed?.kind === "name" && !(typed.key && listedKeys.has(typed.key))) {
+    const known = typed.key ? { ...base(typed.key, "/"), favorite: undefined } : { key: null, current: false, previous: false };
     groups.push({ id: "any", label: "Any branch", items: [{ ...known, id: "typed-name", name: typed.name, title: typed.name, subtitle: LOOKUP_TEXT[typed.status], status: typed.status }] });
   }
   return groups.filter((g) => g.items.length);

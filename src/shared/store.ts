@@ -1,8 +1,8 @@
-import { BRANCH_NAME_RE, KEY_RE, isSafeRoute } from "./preview.ts";
+import { BRANCH_NAME_RE, KEY_RE, isSafeRoute, pagePath } from "./preview.ts";
 
 /**
  * Storage layout
- * - sync:    settings, one "fav:<key>" item per favorite (follows your browser profile)
+ * - sync:    settings, one "fav:<id>" item per favorite page (follows your browser profile)
  * - local:   recent visits and known branch names (this device only)
  * - session: per-tab state for flipping back (cleared when the browser closes)
  * Content scripts can read sync and local, so everything read back is validated.
@@ -15,7 +15,12 @@ export type Settings = {
   notifyComments: boolean;
   desktopAlerts: boolean;
 };
-export type Favorite = { key: string; name?: string; note?: string; route?: string; addedAt: number };
+/**
+ * A favorite is one page on one branch, so a branch can have several.
+ * `id` is "<key>@<page hash>"; favorites saved before 0.3.1 were per branch and use just "<key>".
+ */
+export type Favorite = { id: string; key: string; route: string; name?: string; note?: string; addedAt: number };
+export type NewFavorite = Omit<Favorite, "id">;
 export type Visit = { key: string; route: string; at: number };
 export type TabState = { key: string; route: string; prevKey?: string };
 
@@ -33,18 +38,39 @@ const FAVORITES_MAX = 200;
 const NAMES_MAX = 500;
 const FAV_PREFIX = "fav:";
 
+const ID_RE = new RegExp(`^${KEY_RE.source.slice(1, -1)}(?:@[0-9a-f]{8})?$`);
 const cleanKey = (v: unknown): string | null => (typeof v === "string" && KEY_RE.test(v) ? v : null);
 const cleanName = (v: unknown): string | undefined => (typeof v === "string" && BRANCH_NAME_RE.test(v) ? v : undefined);
 const cleanNote = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v.trim().slice(0, NOTE_MAX) : undefined);
 const cleanRoute = (v: unknown): string | undefined => (isSafeRoute(v) ? v : undefined);
 const cleanTime = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
-function cleanFavorite(v: unknown): Favorite | null {
-  if (!v || typeof v !== "object") return null;
+/** FNV-1a, enough to tell a branch's pages apart in a storage key. */
+function pageHash(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+export const favoriteId = (key: string, route: string): string => `${key}@${pageHash(pagePath(route))}`;
+
+/** Same branch and same page; the query and fragment don't count. */
+export const isSamePage = (f: { key: string; route: string }, key: string, route: string): boolean => f.key === key && pagePath(f.route) === pagePath(route);
+
+export function findFavorite(favorites: Favorite[], key: string, route: string): Favorite | undefined {
+  return favorites.find((f) => isSamePage(f, key, route));
+}
+
+function cleanFavorite(v: unknown, id: string): Favorite | null {
+  if (!v || typeof v !== "object" || !ID_RE.test(id)) return null;
   const o = v as Record<string, unknown>;
   const key = cleanKey(o.key);
-  if (!key) return null;
-  return { key, name: cleanName(o.name), note: cleanNote(o.note), route: cleanRoute(o.route), addedAt: cleanTime(o.addedAt) };
+  if (!key || (id !== key && !id.startsWith(`${key}@`))) return null;
+  // Older branch favorites without a page open the branch's home page.
+  return { id, key, route: cleanRoute(o.route) ?? "/", name: cleanName(o.name), note: cleanNote(o.note), addedAt: cleanTime(o.addedAt) };
 }
 
 function cleanVisit(v: unknown): Visit | null {
@@ -78,22 +104,31 @@ export async function getFavorites(): Promise<Favorite[]> {
   const all = await chrome.storage.sync.get(null);
   return Object.entries(all)
     .filter(([k]) => k.startsWith(FAV_PREFIX))
-    .map(([, v]) => cleanFavorite(v))
+    .map(([k, v]) => cleanFavorite(v, k.slice(FAV_PREFIX.length)))
     .filter((f): f is Favorite => f !== null);
 }
 
-export async function saveFavorite(fav: Favorite): Promise<void> {
-  const clean = cleanFavorite(fav);
+/** Saves a page as a favorite, or updates the one already saved for that page. */
+export async function saveFavorite(fav: NewFavorite): Promise<Favorite> {
+  if (!cleanKey(fav.key) || !isSafeRoute(fav.route)) throw new Error("Not a valid favorite");
+  const id = favoriteId(fav.key, fav.route);
+  const clean = cleanFavorite(fav, id);
   if (!clean) throw new Error("Not a valid favorite");
   const existing = await getFavorites();
-  if (!existing.some((f) => f.key === clean.key) && existing.length >= FAVORITES_MAX) {
+  const samePage = existing.filter((f) => isSamePage(f, clean.key, clean.route));
+  if (!samePage.length && existing.length >= FAVORITES_MAX) {
     throw new Error(`You can keep up to ${FAVORITES_MAX} favorites`);
   }
-  await chrome.storage.sync.set({ [FAV_PREFIX + clean.key]: clean });
+  const { id: _id, ...stored } = clean;
+  await chrome.storage.sync.set({ [FAV_PREFIX + id]: stored });
+  // An older per-branch entry for this page is replaced by the new one.
+  const stale = samePage.filter((f) => f.id !== id).map((f) => FAV_PREFIX + f.id);
+  if (stale.length) await chrome.storage.sync.remove(stale);
+  return clean;
 }
 
-export async function removeFavorite(key: string): Promise<void> {
-  if (cleanKey(key)) await chrome.storage.sync.remove(FAV_PREFIX + key);
+export async function removeFavorite(id: string): Promise<void> {
+  if (ID_RE.test(id)) await chrome.storage.sync.remove(FAV_PREFIX + id);
 }
 
 /* Recent visits */

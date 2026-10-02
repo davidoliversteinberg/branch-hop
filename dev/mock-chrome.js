@@ -45,6 +45,7 @@
         sync: {
           "fav:meridian-brand-template": { key: "meridian-brand-template", note: "Meridian review on Friday", route: "/site/meridian", addedAt: now - 9e6 },
           "fav:main": { key: "main", addedAt: now - 8e6 },
+          "fav:meridian-brand-template@0000abcd": { key: "meridian-brand-template", route: "/site/meridian/brand-story", addedAt: now - 5e6 },
           "fav:david-vision-template": { key: "david-vision-template", name: "david/vision-template", note: "STRIDE Brand Portal, photography-led", addedAt: now - 7e6 },
         },
         local: {

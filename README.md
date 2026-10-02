@@ -1,6 +1,6 @@
 # Branch Hop
 
-A Chrome and Safari extension for Axiom Play previews. Switch to any branch without leaving the page you're on, keep favorites with notes, and share branches with your team.
+A Chrome and Safari extension for Axiom Play previews. Switch to any branch without leaving the page you're on, keep favorite pages with notes, and share branches with your team.
 
 ## What it does
 
@@ -8,7 +8,7 @@ A Chrome and Safari extension for Axiom Play previews. Switch to any branch with
 
 - Shows which branch the current tab is on, and the route you're looking at.
 - Opens another branch on the same route, query and hash. Turn this off with **Keep this route when switching**.
-- **Favorites**: star branches you work on and add a short note to each.
+- **Favorites**: star the pages you work on, as many per branch as you like, and add a short note to each. A favorite always opens the page you saved.
 - **Recent**: the branches you opened in this browser.
 - Opens any branch you type or paste, including long names. Vercel shortens those and adds a hash; Branch Hop works out the same hash and checks that the preview exists before opening it.
 - Puts the branch name in tab titles and a coloured dot on the tab icon.

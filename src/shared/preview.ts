@@ -56,6 +56,11 @@ export function isSafeRoute(route: unknown): route is string {
   return typeof route === "string" && route.startsWith("/") && !route.startsWith("//") && !route.includes("\\") && route.length <= ROUTE_MAX;
 }
 
+/** The page part of a route: its path, without query or fragment. Favorites are saved per page. */
+export function pagePath(route: string): string {
+  return route.split(/[?#]/)[0] || "/";
+}
+
 export function parsePreviewUrl(input: string): PreviewLocation | null {
   let url: URL;
   try {

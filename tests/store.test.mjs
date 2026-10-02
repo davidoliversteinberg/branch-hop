@@ -28,27 +28,67 @@ beforeEach(async () => {
   globalThis.chrome.storage.session = area();
 });
 
-test("favorites round-trip with name, note and route", async () => {
-  await store.saveFavorite({ key: "david-image-gen-editor", name: "david/image-gen-editor", note: "Hype to hero demo", route: "/opal/image-gen", addedAt: 1 });
-  assert.deepEqual(await store.getFavorites(), [{ key: "david-image-gen-editor", name: "david/image-gen-editor", note: "Hype to hero demo", route: "/opal/image-gen", addedAt: 1 }]);
+test("favorites round-trip with name, note and page", async () => {
+  const saved = await store.saveFavorite({ key: "david-image-gen-editor", name: "david/image-gen-editor", note: "Hype to hero demo", route: "/opal/image-gen", addedAt: 1 });
+  assert.match(saved.id, /^david-image-gen-editor@[0-9a-f]{8}$/);
+  assert.deepEqual(await store.getFavorites(), [
+    { id: saved.id, key: "david-image-gen-editor", name: "david/image-gen-editor", note: "Hype to hero demo", route: "/opal/image-gen", addedAt: 1 },
+  ]);
+});
+
+test("one branch can have several favorite pages", async () => {
+  await store.saveFavorite({ key: "david-stride-refresh", route: "/site/brand/brand-story", addedAt: 1 });
+  await store.saveFavorite({ key: "david-stride-refresh", route: "/opal/image-gen", addedAt: 2 });
+  const favorites = await store.getFavorites();
+  assert.deepEqual(favorites.map((f) => f.route).sort(), ["/opal/image-gen", "/site/brand/brand-story"]);
+  assert.equal(store.findFavorite(favorites, "david-stride-refresh", "/opal/image-gen?tab=2#top")?.route, "/opal/image-gen");
+  assert.equal(store.findFavorite(favorites, "david-stride-refresh", "/site"), undefined);
+});
+
+test("saving the same page again updates it instead of adding another", async () => {
+  await store.saveFavorite({ key: "main", route: "/opal?a=1", addedAt: 1 });
+  await store.saveFavorite({ key: "main", route: "/opal?a=2", note: "Opal", addedAt: 1 });
+  const favorites = await store.getFavorites();
+  assert.equal(favorites.length, 1);
+  assert.equal(favorites[0].note, "Opal");
+});
+
+test("older per-branch favorites still load, and are replaced when that page is saved", async () => {
+  await chrome.storage.sync.set({ "fav:main": { key: "main", route: "/opal/image-gen", addedAt: 1 }, "fav:old": { key: "old", addedAt: 1 } });
+  const before = await store.getFavorites();
+  assert.deepEqual(before.map((f) => [f.id, f.route]).sort(), [["main", "/opal/image-gen"], ["old", "/"]]);
+  await store.saveFavorite({ key: "main", route: "/opal/image-gen", note: "Image gen", addedAt: 1 });
+  const after = await store.getFavorites();
+  assert.equal(after.filter((f) => f.key === "main").length, 1);
+  assert.equal(after.find((f) => f.key === "main").note, "Image gen");
+  assert.ok(!("fav:main" in chrome.storage.sync._raw()));
+});
+
+test("removeFavorite removes only that page", async () => {
+  const a = await store.saveFavorite({ key: "main", route: "/a", addedAt: 1 });
+  await store.saveFavorite({ key: "main", route: "/b", addedAt: 1 });
+  await store.removeFavorite(a.id);
+  assert.deepEqual((await store.getFavorites()).map((f) => f.route), ["/b"]);
 });
 
 test("tampered favorites are dropped or cleaned when read back", async () => {
   await chrome.storage.sync.set({
     "fav:ok": { key: "ok", note: "x".repeat(500), route: "//evil.example", name: "bad name<script>" },
     "fav:bad": { key: "evil.example/x" },
+    "fav:mismatch": { key: "other" },
     "fav:junk": "not an object",
   });
   const favorites = await store.getFavorites();
   assert.equal(favorites.length, 1);
   assert.equal(favorites[0].key, "ok");
   assert.equal(favorites[0].note.length, store.NOTE_MAX);
-  assert.equal(favorites[0].route, undefined);
+  assert.equal(favorites[0].route, "/");
   assert.equal(favorites[0].name, undefined);
 });
 
-test("saveFavorite refuses a key that isn't a preview branch", async () => {
-  await assert.rejects(store.saveFavorite({ key: "../../x", addedAt: 0 }));
+test("saveFavorite refuses a key that isn't a preview branch, or an unsafe page", async () => {
+  await assert.rejects(store.saveFavorite({ key: "../../x", route: "/", addedAt: 0 }));
+  await assert.rejects(store.saveFavorite({ key: "main", route: "//evil.example", addedAt: 0 }));
 });
 
 test("recent visits keep the newest first, without duplicates", async () => {

@@ -28,17 +28,19 @@ import type { Unread } from "../shared/messages.ts";
 import { openPreview } from "../shared/nav";
 import { branchColor } from "../shared/palette";
 import { previewUrl } from "../shared/preview";
-import { NOTE_MAX, rememberName, removeFavorite, saveFavorite, setSetting } from "../shared/store";
+import { NOTE_MAX, findFavorite, rememberName, removeFavorite, saveFavorite, setSetting, type Favorite } from "../shared/store";
 import { AccessCard, CommentsPanel, SharePanel, SignInCard, SsoNotice, type ShareTarget } from "./GitHubPanels";
 import { UpdateNotice } from "./UpdateNotice";
-import { ago, buildGroups, type Item, type View } from "./items";
+import { ago, buildGroups, routePath, type Item, type View } from "./items";
 import { SettingsPanel } from "./SettingsPanel";
 import { useExtensionState, useShortcuts } from "./useExtensionState";
 import { send, useGitHub } from "./useGitHub";
 import { useTyped } from "./useTyped";
 
 type Panel = null | { kind: "settings" } | { kind: "share"; target: ShareTarget } | { kind: "comments"; space: string; issue: number };
-type NoteDraft = { key: string; name?: string; route?: string; title: string; value: string };
+type NoteDraft = { key: string; name?: string; route: string; title: string; value: string };
+/** Something that can be starred: a page on a branch. */
+type FavTarget = { key: string | null; name?: string; title: string; route?: string; favorite?: Favorite };
 
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 const MOD = IS_MAC ? "⌘" : "Ctrl";
@@ -68,7 +70,7 @@ function RowMeta({ item, view, flipKeys }: { item: Item; view: View; flipKeys: s
         <Text fontSize="sm" color="fg.tertiary">
           This tab
         </Text>
-      ) : item.previous && flipKeys && !item.shared ? (
+      ) : item.previous && flipKeys && !item.exactRoute ? (
         <Tooltip content="Flip back to this branch">
           <Kbd>{flipKeys}</Kbd>
         </Tooltip>
@@ -141,11 +143,13 @@ export function App() {
     if (activeIndex >= 0) document.getElementById(optionId(activeIndex))?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
 
-  const favOf = (key: string) => ext.favorites.find((f) => f.key === key);
+  const favOf = (key: string, route: string) => findFavorite(ext.favorites, key, route);
   const sharedOf = (key: string) => github.shared.items.find((s) => s.key === key);
-  const nameOf = (key: string) => favOf(key)?.name ?? ext.names[key] ?? sharedOf(key)?.name;
+  const nameOf = (key: string) => ext.favorites.find((f) => f.key === key && f.name)?.name ?? ext.names[key] ?? sharedOf(key)?.name;
   const currentTitle = here ? (nameOf(here.key) ?? here.key) : "";
-  const currentFavorite = here ? favOf(here.key) : undefined;
+  const currentFavorite = here ? favOf(here.key, here.route) : undefined;
+  const currentTarget: FavTarget | null = here && { key: here.key, name: nameOf(here.key), title: currentTitle, route: here.route, favorite: currentFavorite };
+  const targetOf = (item: Item | null): FavTarget | null => item && { key: item.key, name: item.name, title: item.title, route: item.exactRoute ?? item.route, favorite: item.favorite };
   const routeFor = (item: Item) => item.exactRoute ?? (ext.settings.keepRoute && here ? here.route : (item.route ?? "/"));
   const canOpen = !!active?.key && active.status !== "missing" && active.status !== "checking";
 
@@ -170,16 +174,18 @@ export function App() {
     }
   }
 
-  async function toggleFavorite(target: { key: string | null; name?: string; title: string; route?: string; favorite: boolean } | null) {
+  async function toggleFavorite(target: FavTarget | null) {
     if (!target?.key) return;
+    const route = target.route ?? "/";
+    const branch = nameOf(target.key) ?? target.name ?? target.key;
     try {
       if (target.favorite) {
-        await removeFavorite(target.key);
-        toaster.create(`Removed ${target.title} from favorites`);
+        await removeFavorite(target.favorite.id);
+        toaster.create(`Removed ${routePath(route)} on ${branch} from favorites`);
       } else {
-        await saveFavorite({ key: target.key, name: target.name, route: target.route, addedAt: Date.now() });
+        await saveFavorite({ key: target.key, name: target.name, route, addedAt: Date.now() });
         if (target.name) await rememberName(target.key, target.name);
-        toaster.create(`Added ${target.title} to favorites`, { intent: "success" });
+        toaster.create(`Added ${routePath(route)} on ${branch} to favorites`, { intent: "success" });
       }
     } catch (err) {
       toaster.create(errorText(err), { intent: "danger" });
@@ -216,14 +222,14 @@ export function App() {
           name: item.name,
           title: item.title,
           route: item.exactRoute ?? item.route ?? (item.current && here ? here.route : "/"),
-          note: favOf(item.key)?.note,
+          note: item.favorite?.note,
         }
       : null;
 
   async function saveNote(e: FormEvent) {
     e.preventDefault();
     if (!note) return;
-    const existing = favOf(note.key);
+    const existing = favOf(note.key, note.route);
     try {
       await saveFavorite({ key: note.key, name: existing?.name ?? note.name, route: existing?.route ?? note.route, addedAt: existing?.addedAt ?? Date.now(), note: note.value });
       toaster.create(note.value.trim() ? "Note saved" : "Note removed", { intent: "success" });
@@ -296,14 +302,14 @@ export function App() {
               </Tooltip>
             )}
             {here && (
-              <Tooltip content={currentFavorite ? "Remove from favorites" : "Add to favorites"}>
+              <Tooltip content={currentFavorite ? "Remove this page from favorites" : "Add this page to favorites"}>
                 <Button
                   appearance="subtle"
                   size="sm"
-                  aria-label={currentFavorite ? "Remove this branch from favorites" : "Add this branch to favorites"}
+                  aria-label={currentFavorite ? "Remove this page from favorites" : "Add this page to favorites"}
                   aria-pressed={!!currentFavorite}
                   icon={<IconStar filled={!!currentFavorite} />}
-                  onClick={() => void toggleFavorite({ key: here.key, name: nameOf(here.key), title: currentTitle, route: here.route, favorite: !!currentFavorite })}
+                  onClick={() => void toggleFavorite(currentTarget)}
                 />
               </Tooltip>
             )}
@@ -491,7 +497,7 @@ export function App() {
                   query={query}
                   view={view}
                   canAddCurrent={!!here && !currentFavorite}
-                  onAddCurrent={() => here && void toggleFavorite({ key: here.key, name: nameOf(here.key), title: currentTitle, route: here.route, favorite: false })}
+                  onAddCurrent={() => void toggleFavorite(currentTarget)}
                 />
               )}
             </Box>
@@ -500,12 +506,12 @@ export function App() {
           {note ? (
             <Box asChild px="12" py="12" borderT="1" borderColor="border.secondary" display="flex" flexDirection="column" gap="8">
               <form onSubmit={(e) => void saveNote(e)}>
-                <Field label={`Note for ${note.title}`}>
+                <Field label={`Note for ${routePath(note.route)} on ${note.title}`}>
                   <Input
                     autoFocus
                     value={note.value}
                     maxLength={NOTE_MAX}
-                    placeholder="What's this branch for?"
+                    placeholder="What's this page for?"
                     onChange={(e) => setNote({ ...note, value: e.target.value })}
                     onKeyDown={(e) => {
                       if (e.key === "Escape") {
@@ -550,7 +556,7 @@ export function App() {
                     aria-pressed={!!active?.favorite}
                     disabled={!active?.key}
                     icon={<IconStar filled={!!active?.favorite} />}
-                    onClick={() => void toggleFavorite(active && { key: active.key, name: active.name, title: active.title, route: active.exactRoute ?? active.route, favorite: active.favorite })}
+                    onClick={() => void toggleFavorite(targetOf(active))}
                   />
                 </Tooltip>
                 {active?.shared ? (
@@ -571,7 +577,7 @@ export function App() {
                       icon={<IconPenField />}
                       onClick={() =>
                         active?.key &&
-                        setNote({ key: active.key, name: active.name, route: active.exactRoute ?? active.route, title: active.title, value: favOf(active.key)?.note ?? "" })
+                        setNote({ key: active.key, name: active.name, route: active.exactRoute ?? active.route ?? "/", title: nameOf(active.key) ?? active.key, value: active.favorite?.note ?? "" })
                       }
                     />
                   </Tooltip>
@@ -615,7 +621,7 @@ function EmptyState({ query, view, canAddCurrent, onAddCurrent }: { query: strin
   const [title, body] = q
     ? [`Nothing matches “${q}”`, "Paste a preview link, or type a full branch name like david/image-gen-editor."]
     : view === "favorites"
-      ? ["No favorites yet", "Star a branch to keep it here. Add a note so you remember what it's for."]
+      ? ["No favorites yet", "Star a page to keep it here. Save as many pages from one branch as you like, and add a note so you remember what each is for."]
       : view === "shared"
         ? ["Nothing shared yet", "Share the page you're on with the share button at the top, or share any branch from Favorites or Recent."]
         : ["Nothing opened yet", "Branches you open in this browser show up here."];
@@ -627,7 +633,7 @@ function EmptyState({ query, view, canAddCurrent, onAddCurrent }: { query: strin
       </Text>
       {!q && view === "favorites" && canAddCurrent && (
         <Button appearance="primary" icon={<IconStar filled />} onClick={onAddCurrent}>
-          Add this branch
+          Add this page
         </Button>
       )}
     </Box>

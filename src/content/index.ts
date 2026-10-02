@@ -1,6 +1,6 @@
 import { branchColor } from "../shared/palette";
 import { KEY_RE, parsePreviewUrl, previewUrl, shortLabel } from "../shared/preview";
-import { DEFAULT_SETTINGS, getFavorites, getNames, getSettings, type Settings } from "../shared/store";
+import { DEFAULT_SETTINGS, findFavorite, getFavorites, getNames, getSettings, type Settings } from "../shared/store";
 import { ICON_CLOSE, ICON_SWAP } from "./icons";
 import { PILL_CSS } from "./pill-css";
 
@@ -241,8 +241,9 @@ async function start(key: string): Promise<void> {
   async function refresh(): Promise<void> {
     const [nextSettings, favorites, names, nextInfo] = await Promise.all([getSettings(), getFavorites(), getNames(), requestTabInfo()]);
     settings = nextSettings;
-    const favorite = favorites.find((f) => f.key === key);
-    display = { name: favorite?.name ?? names[key] ?? key, note: favorite?.note };
+    const page = findFavorite(favorites, key, location.pathname);
+    const name = favorites.find((f) => f.key === key && f.name)?.name;
+    display = { name: name ?? names[key] ?? key, note: page?.note };
     info = nextInfo;
     applyTitle();
     await applyIcon();
