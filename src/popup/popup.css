@@ -1,0 +1,18 @@
+/* Axiom's font stack, as Axiom Play defines it. Brand faces show when installed; otherwise Axiom's Roboto fallbacks. */
+:root {
+  color-scheme: light dark;
+  --ax-fontFamily-heading: "VC Nudge", "Nudge SemiNormal", "Roboto Condensed Variable", system-ui, sans-serif;
+  --ax-fontFamily-sans: "Die Grotesk B", "DI Grotesk B", "Roboto Variable", system-ui, sans-serif;
+  --ax-fontFamily-mono: "Roboto Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+html,
+body {
+  margin: 0;
+}
+body {
+  width: 380px;
+  background: var(--ax-colors-bg-default);
+  color: var(--ax-colors-fg-default);
+  font-family: var(--ax-fontFamily-sans);
+  letter-spacing: 0.015em;
+}
