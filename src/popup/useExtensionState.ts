@@ -3,6 +3,7 @@ import { parsePreviewUrl, type PreviewLocation } from "../shared/preview";
 import {
   DEFAULT_SETTINGS,
   getFavorites,
+  getMuted,
   getNames,
   getRecent,
   getSettings,
@@ -22,9 +23,10 @@ export type ExtState = {
   favorites: Favorite[];
   recent: Visit[];
   names: Record<string, string>;
+  muted: string[];
 };
 
-const EMPTY: ExtState = { ready: false, active: null, prevKey: null, settings: DEFAULT_SETTINGS, favorites: [], recent: [], names: {} };
+const EMPTY: ExtState = { ready: false, active: null, prevKey: null, settings: DEFAULT_SETTINGS, favorites: [], recent: [], names: {}, muted: [] };
 
 /** Everything the popup shows, kept in step with storage. */
 export function useExtensionState(): ExtState {
@@ -33,14 +35,15 @@ export function useExtensionState(): ExtState {
   const load = useCallback(async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const loc = tab?.url ? parsePreviewUrl(tab.url) : null;
-    const [settings, favorites, recent, names, tabState] = await Promise.all([
+    const [settings, favorites, recent, names, muted, tabState] = await Promise.all([
       getSettings(),
       getFavorites(),
       getRecent(),
       getNames(),
+      getMuted(),
       tab?.id != null ? getTabState(tab.id) : Promise.resolve(null),
     ]);
-    setState({ ready: true, active: tab ? { tab, loc } : null, prevKey: tabState?.prevKey ?? null, settings, favorites, recent, names });
+    setState({ ready: true, active: tab ? { tab, loc } : null, prevKey: tabState?.prevKey ?? null, settings, favorites, recent, names, muted });
   }, []);
 
   useEffect(() => {

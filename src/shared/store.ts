@@ -7,12 +7,26 @@ import { BRANCH_NAME_RE, KEY_RE, isSafeRoute } from "./preview.ts";
  * - session: per-tab state for flipping back (cleared when the browser closes)
  * Content scripts can read sync and local, so everything read back is validated.
  */
-export type Settings = { keepRoute: boolean; tabLabels: boolean; pagePill: boolean };
+export type Settings = {
+  keepRoute: boolean;
+  tabLabels: boolean;
+  pagePill: boolean;
+  notifyShares: boolean;
+  notifyComments: boolean;
+  desktopAlerts: boolean;
+};
 export type Favorite = { key: string; name?: string; note?: string; route?: string; addedAt: number };
 export type Visit = { key: string; route: string; at: number };
 export type TabState = { key: string; route: string; prevKey?: string };
 
-export const DEFAULT_SETTINGS: Settings = { keepRoute: true, tabLabels: true, pagePill: true };
+export const DEFAULT_SETTINGS: Settings = {
+  keepRoute: true,
+  tabLabels: true,
+  pagePill: true,
+  notifyShares: true,
+  notifyComments: true,
+  desktopAlerts: true,
+};
 export const NOTE_MAX = 120;
 const RECENT_MAX = 40;
 const FAVORITES_MAX = 200;
@@ -138,4 +152,18 @@ export async function setTabState(tabId: number, state: TabState): Promise<void>
 
 export async function clearTabState(tabId: number): Promise<void> {
   await sessionArea().remove(`tab:${tabId}`);
+}
+
+/* Branches you've muted: no comment notifications for these */
+export async function getMuted(): Promise<string[]> {
+  const { muted } = await chrome.storage.sync.get("muted");
+  return Array.isArray(muted) ? muted.filter((k): k is string => cleanKey(k) !== null).slice(0, FAVORITES_MAX) : [];
+}
+
+export async function setMuted(key: string, isMuted: boolean): Promise<void> {
+  if (!cleanKey(key)) return;
+  const muted = new Set(await getMuted());
+  if (isMuted) muted.add(key);
+  else muted.delete(key);
+  await chrome.storage.sync.set({ muted: [...muted].slice(0, FAVORITES_MAX) });
 }

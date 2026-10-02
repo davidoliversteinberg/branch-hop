@@ -53,15 +53,24 @@ test("saveFavorite refuses a key that isn't a preview branch", async () => {
 
 test("recent visits keep the newest first, without duplicates", async () => {
   await store.recordVisit({ key: "main", route: "/", at: 1 });
-  await store.recordVisit({ key: "tra-meridian-brand-template", route: "/site/meridian", at: 2 });
+  await store.recordVisit({ key: "meridian-brand-template", route: "/site/meridian", at: 2 });
   await store.recordVisit({ key: "main", route: "/opal/image-gen", at: 3 });
   assert.deepEqual((await store.getRecent()).map((v) => [v.key, v.route]), [
     ["main", "/opal/image-gen"],
-    ["tra-meridian-brand-template", "/site/meridian"],
+    ["meridian-brand-template", "/site/meridian"],
   ]);
 });
 
 test("settings fall back to defaults and ignore non-boolean values", async () => {
   await chrome.storage.sync.set({ settings: { tabLabels: false, pagePill: "yes" } });
-  assert.deepEqual(await store.getSettings(), { keepRoute: true, tabLabels: false, pagePill: true });
+  assert.deepEqual(await store.getSettings(), { ...store.DEFAULT_SETTINGS, tabLabels: false });
+});
+
+test("muted branches are validated and de-duplicated", async () => {
+  await store.setMuted("main", true);
+  await store.setMuted("main", true);
+  await store.setMuted("../evil", true);
+  assert.deepEqual(await store.getMuted(), ["main"]);
+  await store.setMuted("main", false);
+  assert.deepEqual(await store.getMuted(), []);
 });

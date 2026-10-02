@@ -1,6 +1,6 @@
 {
   "name": "branch-hop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Chrome and Safari extension for hopping between Axiom Play preview branches.",
   "type": "module",

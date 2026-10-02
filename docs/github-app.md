@@ -1,4 +1,4 @@
-# GitHub sign-in setup (for v0.2)
+# GitHub sign-in setup
 
 Shared lists, comments and notifications use a GitHub App owned by the Branch Hop maintainer. It works without any company approval, because the app is only installed on one private repo, `branch-hop-shared`.
 
@@ -10,7 +10,7 @@ Open <https://github.com/settings/apps/new> and fill in the form.
 
 | Field | Value |
 | --- | --- |
-| GitHub App name | Branch Hop for Axiom Play |
+| GitHub App name | Branch Hop (any free name works; ours is at github.com/settings/apps/branch-hop) |
 | Homepage URL | `https://github.com/davidoliversteinberg/branch-hop` |
 | Callback URL | Leave empty |
 | Expire user authorization tokens | On |
@@ -30,7 +30,7 @@ On the app's page, open **Install App**, click **Install**, choose **Only select
 
 ## 3. Point Branch Hop at the app
 
-The app's Client ID (it starts with `Iv`) is public, and it goes in the extension's GitHub settings in `src/shared/github.ts`. It can be looked up from the app's public page, so nobody needs to send it around.
+The app's Client ID (it starts with `Iv`) is public. It's set as `GITHUB.clientId` in `src/shared/github.ts`, along with the shared repo's owner and name. This is already done for the current app.
 
 ## Adding teammates
 

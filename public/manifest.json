@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Branch Hop",
   "version": "0.0.0",
-  "description": "Hop between Axiom Play preview branches without losing your place.",
+  "description": "Hop between Axiom Play preview branches, keep favorites, and share branches with your team.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArlQmsfY+r/2VPizf8Y8kZacUAtk6ZPJQcqLu5MTUD8/2vMdGXvpannXlj73LF51MS9d/2YZANc7xvCxcpZY4pAxorn4Gu+qG/kKzrerxUoRBfmeXfuJth16YBJ9rGWvUuFE60+tBhRII8OG/jz8Tt5NwCPLV3iA0NUfx1C7wYZd8sIViuEGa054v4VaI1aMwprHN2BbkH43RFcOfeUf/5fym0opVVCsmcZp3xXTbxnVt/tABOzALuM2jMVGubyYNY4ap7FaFgYC6fsF9A86AtlxyOJmcSjzaB0Bfn/oFmUWX43KkK0JLcFZ6R0d2aOkGNrdgDDWGyt3TQTaZwYMxZQIDAQAB",
   "minimum_chrome_version": "123",
   "icons": {
@@ -37,10 +37,14 @@
     }
   ],
   "host_permissions": [
-    "https://*.vercel.app/*"
+    "https://*.vercel.app/*",
+    "https://github.com/*",
+    "https://api.github.com/*"
   ],
   "permissions": [
-    "storage"
+    "storage",
+    "alarms",
+    "notifications"
   ],
   "commands": {
     "_execute_action": {

@@ -1,5 +1,6 @@
 import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Avatar,
   Badge,
   Box,
   Button,
@@ -22,152 +23,26 @@ import {
   Tooltip,
   toaster,
 } from "@optiaxiom/react";
-import { IconArrowUpRightFromSquare, IconCopy, IconGear, IconPenField, IconStar } from "@optiaxiom/icons";
-import { checkPreview, openPreview, type PreviewStatus } from "../shared/nav";
+import { IconArrowUpRightFromSquare, IconComment, IconCopy, IconGear, IconPenField, IconShareNodes, IconStar } from "@optiaxiom/icons";
+import type { Unread } from "../shared/messages.ts";
+import { openPreview } from "../shared/nav";
 import { branchColor } from "../shared/palette";
-import { BRANCH_NAME_RE, keyForBranch, parsePreviewUrl, previewUrl } from "../shared/preview";
-import { NOTE_MAX, clearRecent, rememberName, removeFavorite, saveFavorite, setSetting, type Favorite, type Visit } from "../shared/store";
-import { type ExtState, useExtensionState, useShortcuts } from "./useExtensionState";
+import { previewUrl } from "../shared/preview";
+import { NOTE_MAX, rememberName, removeFavorite, saveFavorite, setSetting } from "../shared/store";
+import { AccessCard, CommentsPanel, SharePanel, SignInCard, type ShareTarget } from "./GitHubPanels";
+import { ago, buildGroups, type Item, type View } from "./items";
+import { SettingsPanel } from "./SettingsPanel";
+import { useExtensionState, useShortcuts } from "./useExtensionState";
+import { send, useGitHub } from "./useGitHub";
+import { useTyped } from "./useTyped";
 
-type View = "favorites" | "recent";
-type Lookup = PreviewStatus | "checking";
-type Typed = { kind: "link"; key: string; route: string } | { kind: "name"; name: string; key: string | null; status: Lookup };
-
-type Item = {
-  id: string;
-  key: string | null;
-  name?: string;
-  title: string;
-  subtitle: string;
-  route?: string;
-  exactRoute?: string;
-  favorite: boolean;
-  current: boolean;
-  previous: boolean;
-  time?: string;
-  status?: Lookup;
-};
-type ItemGroup = { id: string; label: string; items: Item[] };
+type Panel = null | { kind: "settings" } | { kind: "share"; target: ShareTarget } | { kind: "comments"; issue: number };
 type NoteDraft = { key: string; name?: string; route?: string; title: string; value: string };
 
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 const MOD = IS_MAC ? "⌘" : "Ctrl";
 const optionId = (index: number) => `branch-option-${index}`;
-const routePath = (route: string) => route.split(/[?#]/)[0] || "/";
-
-function ago(ts: number): string {
-  const mins = Math.round((Date.now() - ts) / 60000);
-  if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d`;
-  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-const LOOKUP_TEXT: Record<Lookup, string> = {
-  checking: "Looking for its preview…",
-  found: "Preview found",
-  missing: "No preview yet. Vercel builds one after the first push.",
-  error: "Couldn't reach Vercel to check",
-};
-
-function buildGroups(ext: ExtState, view: View, query: string, typed: Typed | null): ItemGroup[] {
-  const here = ext.active?.loc ?? null;
-  const favs = new Map(ext.favorites.map((f) => [f.key, f]));
-  const visits = new Map(ext.recent.map((v) => [v.key, v]));
-  const nameOf = (key: string) => favs.get(key)?.name ?? ext.names[key];
-  const base = (key: string) => ({
-    key,
-    name: nameOf(key),
-    title: nameOf(key) ?? key,
-    favorite: favs.has(key),
-    current: key === here?.key,
-    previous: key === ext.prevKey,
-  });
-
-  const fromFavorite = (f: Favorite): Item => {
-    const v = visits.get(f.key);
-    return { ...base(f.key), id: `fav-${f.key}`, subtitle: f.note ?? (v ? routePath(v.route) : "Not opened yet"), route: v?.route ?? f.route, time: v ? ago(v.at) : undefined };
-  };
-  const fromVisit = (v: Visit): Item => ({
-    ...base(v.key),
-    id: `recent-${v.key}`,
-    subtitle: favs.get(v.key)?.note ?? routePath(v.route),
-    route: v.route,
-    time: ago(v.at),
-  });
-
-  const lastSeen = (f: Favorite) => visits.get(f.key)?.at ?? f.addedAt;
-  const favorites = [...ext.favorites].sort((a, b) => lastSeen(b) - lastSeen(a)).map(fromFavorite);
-  const recent = ext.recent.filter((v) => v.key !== here?.key).map(fromVisit);
-
-  const q = query.trim().toLowerCase();
-  if (!q) {
-    const group = view === "favorites" ? { id: "favorites", label: "Favorites", items: favorites } : { id: "recent", label: "Recently opened", items: recent };
-    return group.items.length ? [group] : [];
-  }
-
-  const tokens = q.split(/\s+/);
-  const matches = (item: Item) => {
-    const hay = [item.title, item.key ?? "", item.subtitle].join(" ").toLowerCase();
-    return tokens.every((t) => hay.includes(t));
-  };
-  const groups: ItemGroup[] = [
-    { id: "favorites", label: "Favorites", items: favorites.filter(matches) },
-    { id: "recent", label: "Recent", items: recent.filter((i) => !i.favorite && matches(i)) },
-  ];
-  const listed = new Set(groups.flatMap((g) => g.items.map((i) => i.key)));
-  if (typed?.kind === "link" && !listed.has(typed.key)) {
-    groups.push({ id: "any", label: "Pasted link", items: [{ ...base(typed.key), id: "typed-link", subtitle: routePath(typed.route), exactRoute: typed.route }] });
-  } else if (typed?.kind === "name" && !(typed.key && listed.has(typed.key))) {
-    const known = typed.key ? base(typed.key) : { key: null, favorite: false, current: false, previous: false };
-    groups.push({
-      id: "any",
-      label: "Any branch",
-      items: [{ ...known, id: "typed-name", name: typed.name, title: typed.name, subtitle: LOOKUP_TEXT[typed.status], status: typed.status }],
-    });
-  }
-  return groups.filter((g) => g.items.length);
-}
-
-/** Resolves a pasted preview link, or a typed branch name to its preview (hash included). */
-function useTyped(query: string, enabled: boolean): Typed | null {
-  const [typed, setTyped] = useState<Typed | null>(null);
-  useEffect(() => {
-    const q = query.trim();
-    const link = parsePreviewUrl(q);
-    if (link) {
-      setTyped({ kind: "link", key: link.key, route: link.route });
-      return;
-    }
-    if (!enabled || q.length < 2 || !BRANCH_NAME_RE.test(q)) {
-      setTyped(null);
-      return;
-    }
-    let cancelled = false;
-    setTyped({ kind: "name", name: q, key: null, status: "checking" });
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          const key = await keyForBranch(q);
-          if (cancelled) return;
-          setTyped({ kind: "name", name: q, key, status: "checking" });
-          const status = await checkPreview(key);
-          if (!cancelled) setTyped({ kind: "name", name: q, key, status });
-        } catch {
-          if (!cancelled) setTyped({ kind: "name", name: q, key: null, status: "error" });
-        }
-      })();
-    }, 350);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [query, enabled]);
-  return typed;
-}
+const errorText = (err: unknown) => (err instanceof Error ? err.message : "Something went wrong.");
 
 function BranchDot({ branchKey }: { branchKey: string | null }) {
   return (
@@ -181,21 +56,38 @@ function RowMeta({ item, view, flipKeys }: { item: Item; view: View; flipKeys: s
   if (item.status === "checking") return <Badge intent="neutral" variant="subtle">Checking</Badge>;
   if (item.status === "found") return <Badge intent="success" variant="subtle">Preview</Badge>;
   if (item.status === "missing") return <Badge intent="warning" variant="subtle">No preview</Badge>;
-  if (item.current) return <Text fontSize="sm" color="fg.tertiary">This tab</Text>;
-  if (item.previous && flipKeys) {
-    return (
-      <Tooltip content="Flip back to this branch">
-        <Kbd>{flipKeys}</Kbd>
-      </Tooltip>
-    );
-  }
   return (
-    <Group gap="4" alignItems="center">
-      {item.favorite && view === "recent" && <IconStar filled size={14} aria-label="Favorite" />}
-      {item.time && (
-        <Text fontSize="sm" color="fg.tertiary" style={{ fontVariantNumeric: "tabular-nums" }}>
-          {item.time}
+    <Group gap="8" alignItems="center">
+      {item.unread && (
+        <Badge intent="information" variant="subtle">
+          New
+        </Badge>
+      )}
+      {item.current ? (
+        <Text fontSize="sm" color="fg.tertiary">
+          This tab
         </Text>
+      ) : item.previous && flipKeys && !item.shared ? (
+        <Tooltip content="Flip back to this branch">
+          <Kbd>{flipKeys}</Kbd>
+        </Tooltip>
+      ) : (
+        <>
+          {item.favorite && view === "recent" && <IconStar filled size={14} aria-label="Favorite" />}
+          {!!item.shared?.comments && (
+            <Group gap="2" alignItems="center" aria-label={`${item.shared.comments} comments`}>
+              <IconComment size={14} />
+              <Text fontSize="sm" color="fg.tertiary" style={{ fontVariantNumeric: "tabular-nums" }}>
+                {item.shared.comments}
+              </Text>
+            </Group>
+          )}
+          {item.time && !item.unread && (
+            <Text fontSize="sm" color="fg.tertiary" style={{ fontVariantNumeric: "tabular-nums" }}>
+              {item.time}
+            </Text>
+          )}
+        </>
       )}
     </Group>
   );
@@ -203,27 +95,40 @@ function RowMeta({ item, view, flipKeys }: { item: Item; view: View; flipKeys: s
 
 export function App() {
   const ext = useExtensionState();
+  const github = useGitHub();
   const shortcuts = useShortcuts();
   const [view, setView] = useState<View>("favorites");
   const [viewChosen, setViewChosen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [panel, setPanel] = useState<Panel>(null);
   const [query, setQuery] = useState("");
   const [hi, setHi] = useState(0);
   const [note, setNote] = useState<NoteDraft | null>(null);
+  const [seen, setSeen] = useState<Unread>({});
   const searchRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (ext.ready && !viewChosen) {
-      // Favorites first; Recent when there are no favorites but other branches were opened.
-      const otherVisits = ext.recent.some((v) => v.key !== ext.active?.loc?.key);
-      setView(!ext.favorites.length && otherVisits ? "recent" : "favorites");
-      setViewChosen(true);
-    }
-  }, [ext.ready, ext.favorites.length, ext.recent, ext.active, viewChosen]);
+  const signedIn = github.auth.state === "signed-in";
+  const me = github.auth.state === "signed-in" ? github.auth.me : null;
+  const unreadCount = Object.keys(github.unread).length;
 
-  const baseGroups = useMemo(() => buildGroups(ext, view, query, null), [ext, view, query]);
+  useEffect(() => {
+    if (!ext.ready || !github.ready || viewChosen) return;
+    const otherVisits = ext.recent.some((v) => v.key !== ext.active?.loc?.key);
+    // Shared first when there's something new or a sign-in is waiting; then favorites; then recent.
+    setView(unreadCount || github.auth.state === "pending" ? "shared" : !ext.favorites.length && otherVisits ? "recent" : "favorites");
+    setViewChosen(true);
+  }, [ext.ready, github.ready, viewChosen, unreadCount, github.auth.state, ext.recent, ext.favorites.length, ext.active]);
+
+  // Opening the Shared view marks things read; "New" stays on them until the popup closes.
+  useEffect(() => {
+    if (view !== "shared" || !signedIn || !unreadCount) return;
+    setSeen((prev) => ({ ...prev, ...github.unread }));
+    void send({ type: "mark-read" }).catch(() => undefined);
+  }, [view, signedIn, unreadCount, github.unread]);
+
+  const sources = useMemo(() => ({ ext, shared: github.shared.items, me: me?.login ?? null, seen }), [ext, github.shared.items, me, seen]);
+  const baseGroups = useMemo(() => buildGroups(sources, view, query, null), [sources, view, query]);
   const typed = useTyped(query, query.includes("/") || baseGroups.length === 0);
-  const groups = useMemo(() => (typed ? buildGroups(ext, view, query, typed) : baseGroups), [ext, view, query, typed, baseGroups]);
+  const groups = useMemo(() => (typed ? buildGroups(sources, view, query, typed) : baseGroups), [sources, view, query, typed, baseGroups]);
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);
   const activeIndex = flat.length ? Math.min(hi, flat.length - 1) : -1;
   const active = activeIndex >= 0 ? flat[activeIndex] : null;
@@ -236,7 +141,9 @@ export function App() {
   }, [activeIndex]);
 
   const favOf = (key: string) => ext.favorites.find((f) => f.key === key);
-  const currentTitle = here ? (favOf(here.key)?.name ?? ext.names[here.key] ?? here.key) : "";
+  const sharedOf = (key: string) => github.shared.items.find((s) => s.key === key);
+  const nameOf = (key: string) => favOf(key)?.name ?? ext.names[key] ?? sharedOf(key)?.name;
+  const currentTitle = here ? (nameOf(here.key) ?? here.key) : "";
   const currentFavorite = here ? favOf(here.key) : undefined;
   const routeFor = (item: Item) => item.exactRoute ?? (ext.settings.keepRoute && here ? here.route : (item.route ?? "/"));
   const canOpen = !!active?.key && active.status !== "missing" && active.status !== "checking";
@@ -274,7 +181,7 @@ export function App() {
         toaster.create(`Added ${target.title} to favorites`, { intent: "success" });
       }
     } catch (err) {
-      toaster.create(err instanceof Error ? err.message : "Couldn't update favorites", { intent: "danger" });
+      toaster.create(errorText(err), { intent: "danger" });
     }
   }
 
@@ -290,6 +197,28 @@ export function App() {
     }
   }
 
+  function startShare(target: ShareTarget) {
+    if (!signedIn) {
+      setPanel(null);
+      setView("shared");
+      setQuery("");
+      toaster.create("Sign in with GitHub to share branches.", { intent: "information" });
+      return;
+    }
+    setPanel({ kind: "share", target });
+  }
+
+  const shareTargetFor = (item: Item): ShareTarget | null =>
+    item.key
+      ? {
+          key: item.key,
+          name: item.name,
+          title: item.title,
+          route: item.exactRoute ?? item.route ?? (item.current && here ? here.route : "/"),
+          note: favOf(item.key)?.note,
+        }
+      : null;
+
   async function saveNote(e: FormEvent) {
     e.preventDefault();
     if (!note) return;
@@ -300,13 +229,8 @@ export function App() {
       setNote(null);
       searchRef.current?.focus();
     } catch (err) {
-      toaster.create(err instanceof Error ? err.message : "Couldn't save the note", { intent: "danger" });
+      toaster.create(errorText(err), { intent: "danger" });
     }
-  }
-
-  function startNote(item: Item | null) {
-    if (!item?.key) return;
-    setNote({ key: item.key, name: item.name, route: item.exactRoute ?? item.route, title: item.title, value: favOf(item.key)?.note ?? "" });
   }
 
   function onSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -325,6 +249,15 @@ export function App() {
     }
   }
 
+  async function signIn(): Promise<void> {
+    try {
+      await github.signIn();
+      setView("shared");
+    } catch (err) {
+      toaster.create(errorText(err), { intent: "danger" });
+    }
+  }
+
   if (!ext.ready) {
     return (
       <Box p="16">
@@ -333,6 +266,15 @@ export function App() {
     );
   }
 
+  const commentsItem = panel?.kind === "comments" ? github.shared.items.find((s) => s.number === panel.issue) : undefined;
+  const showSharedGate = view === "shared" && !query.trim();
+  const sharedBody =
+    showSharedGate && !signedIn ? (
+      <SignInCard auth={github.auth} onSignIn={signIn} />
+    ) : showSharedGate && github.shared.status !== "ok" && github.shared.status !== "signed-out" && github.shared.items.length === 0 ? (
+      <AccessCard shared={github.shared} onRetry={() => void github.refresh().catch(() => undefined)} />
+    ) : null;
+
   return (
     <Box display="flex" flexDirection="column" style={{ maxHeight: 600 }}>
       <Box px="16" py="12" borderB="1" borderColor="border.secondary" display="flex" flexDirection="column" gap="4">
@@ -340,7 +282,18 @@ export function App() {
           <Text fontSize="sm" color="fg.secondary">
             This tab
           </Text>
-          <Group gap="4">
+          <Group gap="4" alignItems="center">
+            {here && (
+              <Tooltip content="Share this page">
+                <Button
+                  appearance="subtle"
+                  size="sm"
+                  aria-label="Share this page"
+                  icon={<IconShareNodes />}
+                  onClick={() => startShare({ key: here.key, name: nameOf(here.key), title: currentTitle, route: here.route, note: currentFavorite?.note })}
+                />
+              </Tooltip>
+            )}
             {here && (
               <Tooltip content={currentFavorite ? "Remove from favorites" : "Add to favorites"}>
                 <Button
@@ -349,13 +302,31 @@ export function App() {
                   aria-label={currentFavorite ? "Remove this branch from favorites" : "Add this branch to favorites"}
                   aria-pressed={!!currentFavorite}
                   icon={<IconStar filled={!!currentFavorite} />}
-                  onClick={() => void toggleFavorite({ key: here.key, name: ext.names[here.key], title: currentTitle, route: here.route, favorite: !!currentFavorite })}
+                  onClick={() => void toggleFavorite({ key: here.key, name: nameOf(here.key), title: currentTitle, route: here.route, favorite: !!currentFavorite })}
                 />
               </Tooltip>
             )}
-            <Tooltip content={settingsOpen ? "Close settings" : "Settings"}>
-              <Button appearance="subtle" size="sm" aria-label="Settings" aria-pressed={settingsOpen} icon={<IconGear />} onClick={() => setSettingsOpen((v) => !v)} />
+            <Tooltip content={panel?.kind === "settings" ? "Close settings" : "Settings"}>
+              <Button
+                appearance="subtle"
+                size="sm"
+                aria-label="Settings"
+                aria-pressed={panel?.kind === "settings"}
+                icon={<IconGear />}
+                onClick={() => setPanel((p) => (p?.kind === "settings" ? null : { kind: "settings" }))}
+              />
             </Tooltip>
+            {me && (
+              <Tooltip content={`Signed in to GitHub as @${me.login}`}>
+                <Button
+                  appearance="subtle"
+                  size="sm"
+                  aria-label={`Signed in as @${me.login}. Open settings`}
+                  icon={<Avatar size="xs" name={me.name ?? me.login} src={me.avatarUrl} />}
+                  onClick={() => setPanel({ kind: "settings" })}
+                />
+              </Tooltip>
+            )}
           </Group>
         </Group>
         {here ? (
@@ -371,7 +342,7 @@ export function App() {
             <Text fontSize="sm" fontFamily="mono" color="fg.secondary" truncate title={here.route}>
               {here.route}
             </Text>
-            {!settingsOpen && (
+            {!panel && (
               <Box pt="8">
                 <Switch checked={ext.settings.keepRoute} onCheckedChange={(v) => void setSetting("keepRoute", v)}>
                   Keep this route when switching
@@ -391,8 +362,34 @@ export function App() {
         )}
       </Box>
 
-      {settingsOpen ? (
-        <SettingsPanel ext={ext} shortcuts={shortcuts} onDone={() => setSettingsOpen(false)} />
+      {panel?.kind === "settings" ? (
+        <SettingsPanel
+          ext={ext}
+          auth={github.auth}
+          shortcuts={shortcuts}
+          onSignIn={() => {
+            setPanel(null);
+            void signIn();
+          }}
+          onDone={() => setPanel(null)}
+        />
+      ) : panel?.kind === "share" && me ? (
+        <SharePanel
+          target={panel.target}
+          existing={sharedOf(panel.target.key)}
+          people={github.shared.people}
+          lists={github.shared.lists}
+          me={me.login}
+          onClose={() => setPanel(null)}
+        />
+      ) : panel?.kind === "comments" && commentsItem && me ? (
+        <CommentsPanel
+          shared={commentsItem}
+          title={nameOf(commentsItem.key) ?? commentsItem.key}
+          me={me.login}
+          muted={ext.muted.includes(commentsItem.key)}
+          onClose={() => setPanel(null)}
+        />
       ) : (
         <>
           <Box px="16" pt="12" display="flex" flexDirection="column" gap="8">
@@ -416,11 +413,25 @@ export function App() {
                 value={view}
                 aria-label="Show"
                 onValueChange={(v: string) => {
-                  if (v === "favorites" || v === "recent") setView(v);
+                  if (v === "favorites" || v === "shared" || v === "recent") setView(v);
                 }}
               >
                 <SegmentedControlItem value="favorites" style={{ flex: 1 }}>
                   Favorites
+                </SegmentedControlItem>
+                <SegmentedControlItem
+                  value="shared"
+                  style={{ flex: 1 }}
+                  aria-label={unreadCount && view !== "shared" ? `Shared, ${unreadCount} new` : "Shared"}
+                  addonAfter={
+                    unreadCount > 0 && view !== "shared" ? (
+                      <Badge intent="information" variant="strong">
+                        {unreadCount > 9 ? "9+" : unreadCount}
+                      </Badge>
+                    ) : undefined
+                  }
+                >
+                  Shared
                 </SegmentedControlItem>
                 <SegmentedControlItem value="recent" style={{ flex: 1 }}>
                   Recent
@@ -429,47 +440,65 @@ export function App() {
             )}
           </Box>
 
-          <Box px="8" py="8" overflow="auto" style={{ flex: "1 1 auto", minHeight: 160 }}>
-            {flat.length > 0 ? (
-              <Listbox id="branch-list" role="listbox" aria-label="Branches">
-                {groups.map((g) => (
-                  <ListboxGroup key={g.id} role="group" aria-labelledby={`group-${g.id}`}>
-                    <ListboxLabel id={`group-${g.id}`}>{g.label}</ListboxLabel>
-                    {g.items.map((item) => {
-                      const index = flat.indexOf(item);
-                      const highlighted = index === activeIndex;
-                      return (
-                        <ListboxItem
-                          key={item.id}
-                          id={optionId(index)}
-                          role="option"
-                          aria-selected={highlighted}
-                          data-highlighted={highlighted ? "" : undefined}
-                          addonBefore={item.key === null || item.id === "typed-name" ? undefined : <BranchDot branchKey={item.key} />}
-                          icon={item.id === "typed-name" ? <IconArrowUpRightFromSquare /> : undefined}
-                          addonAfter={<RowMeta item={item} view={view} flipKeys={shortcuts.flip} />}
-                          description={item.subtitle}
-                          onMouseMove={() => {
-                            if (index !== activeIndex) setHi(index);
-                          }}
-                          onClick={(e) => void open(item, e.metaKey || e.ctrlKey)}
-                        >
-                          {item.title}
-                        </ListboxItem>
-                      );
-                    })}
-                  </ListboxGroup>
-                ))}
-              </Listbox>
-            ) : (
-              <EmptyState
-                query={query}
-                view={view}
-                canAddCurrent={!!here && !currentFavorite}
-                onAddCurrent={() => here && void toggleFavorite({ key: here.key, name: ext.names[here.key], title: currentTitle, route: here.route, favorite: false })}
-              />
-            )}
-          </Box>
+          {sharedBody ?? (
+            <Box px="8" py="8" overflow="auto" style={{ flex: "1 1 auto", minHeight: 160 }}>
+              {view === "shared" && signedIn && !query && (
+                <Group justifyContent="space-between" alignItems="center" px="8" pb="4">
+                  <Text fontSize="sm" color={github.shared.status === "ok" ? "fg.tertiary" : "fg.warning.strong"}>
+                    {github.shared.status !== "ok"
+                      ? (github.shared.message ?? "Couldn't sync with GitHub")
+                      : github.shared.fetchedAt
+                        ? Date.now() - github.shared.fetchedAt < 60000
+                          ? "Updated just now"
+                          : `Updated ${ago(github.shared.fetchedAt)} ago`
+                        : "Not synced yet"}
+                  </Text>
+                  <Button appearance="subtle" size="sm" loading={github.syncing} onClick={() => void github.refresh().catch(() => undefined)}>
+                    Refresh
+                  </Button>
+                </Group>
+              )}
+              {flat.length > 0 ? (
+                <Listbox id="branch-list" role="listbox" aria-label="Branches">
+                  {groups.map((g) => (
+                    <ListboxGroup key={g.id} role="group" aria-labelledby={`group-${g.id}`}>
+                      <ListboxLabel id={`group-${g.id}`}>{g.label}</ListboxLabel>
+                      {g.items.map((item) => {
+                        const index = flat.indexOf(item);
+                        const highlighted = index === activeIndex;
+                        return (
+                          <ListboxItem
+                            key={item.id}
+                            id={optionId(index)}
+                            role="option"
+                            aria-selected={highlighted}
+                            data-highlighted={highlighted ? "" : undefined}
+                            addonBefore={item.id === "typed-name" ? undefined : <BranchDot branchKey={item.key} />}
+                            icon={item.id === "typed-name" ? <IconArrowUpRightFromSquare /> : undefined}
+                            addonAfter={<RowMeta item={item} view={view} flipKeys={shortcuts.flip} />}
+                            description={item.subtitle}
+                            onMouseMove={() => {
+                              if (index !== activeIndex) setHi(index);
+                            }}
+                            onClick={(e) => void open(item, e.metaKey || e.ctrlKey)}
+                          >
+                            {item.title}
+                          </ListboxItem>
+                        );
+                      })}
+                    </ListboxGroup>
+                  ))}
+                </Listbox>
+              ) : (
+                <EmptyState
+                  query={query}
+                  view={view}
+                  canAddCurrent={!!here && !currentFavorite}
+                  onAddCurrent={() => here && void toggleFavorite({ key: here.key, name: nameOf(here.key), title: currentTitle, route: here.route, favorite: false })}
+                />
+              )}
+            </Box>
+          )}
 
           {note ? (
             <Box asChild px="12" py="12" borderT="1" borderColor="border.secondary" display="flex" flexDirection="column" gap="8">
@@ -501,6 +530,7 @@ export function App() {
               </form>
             </Box>
           ) : (
+            !sharedBody &&
             flat.length > 0 && (
               <Group px="12" py="8" gap="8" alignItems="center" borderT="1" borderColor="border.secondary">
                 <Tooltip content={onPreview ? "Open in this tab (Enter)" : "Open in a new tab (Enter)"}>
@@ -526,8 +556,40 @@ export function App() {
                     onClick={() => void toggleFavorite(active && { key: active.key, name: active.name, title: active.title, route: active.exactRoute ?? active.route, favorite: active.favorite })}
                   />
                 </Tooltip>
-                <Tooltip content="Add a note">
-                  <Button appearance="subtle" aria-label="Add a note" disabled={!active?.key} icon={<IconPenField />} onClick={() => startNote(active)} />
+                {active?.shared ? (
+                  <Tooltip content="Comments">
+                    <Button
+                      appearance="subtle"
+                      aria-label={`Comments (${active.shared.comments})`}
+                      icon={<IconComment />}
+                      onClick={() => active.shared && setPanel({ kind: "comments", issue: active.shared.number })}
+                    />
+                  </Tooltip>
+                ) : (
+                  <Tooltip content="Add a note">
+                    <Button
+                      appearance="subtle"
+                      aria-label="Add a note"
+                      disabled={!active?.key}
+                      icon={<IconPenField />}
+                      onClick={() =>
+                        active?.key &&
+                        setNote({ key: active.key, name: active.name, route: active.exactRoute ?? active.route, title: active.title, value: favOf(active.key)?.note ?? "" })
+                      }
+                    />
+                  </Tooltip>
+                )}
+                <Tooltip content={active?.shared ? "Update sharing" : "Share"}>
+                  <Button
+                    appearance="subtle"
+                    aria-label={active?.shared ? "Update sharing" : "Share"}
+                    disabled={!active?.key}
+                    icon={<IconShareNodes />}
+                    onClick={() => {
+                      const target = active && shareTargetFor(active);
+                      if (target) startShare(target);
+                    }}
+                  />
                 </Tooltip>
                 <Menu
                   options={[
@@ -557,7 +619,9 @@ function EmptyState({ query, view, canAddCurrent, onAddCurrent }: { query: strin
     ? [`Nothing matches “${q}”`, "Paste a preview link, or type a full branch name like david/image-gen-editor."]
     : view === "favorites"
       ? ["No favorites yet", "Star a branch to keep it here. Add a note so you remember what it's for."]
-      : ["Nothing opened yet", "Branches you open in this browser show up here."];
+      : view === "shared"
+        ? ["Nothing shared yet", "Share the page you're on with the share button at the top, or share any branch from Favorites or Recent."]
+        : ["Nothing opened yet", "Branches you open in this browser show up here."];
   return (
     <Box px="8" py="16" display="flex" flexDirection="column" gap="8" alignItems="start">
       <Text fontWeight="500">{title}</Text>
@@ -569,70 +633,6 @@ function EmptyState({ query, view, canAddCurrent, onAddCurrent }: { query: strin
           Add this branch
         </Button>
       )}
-    </Box>
-  );
-}
-
-function SettingsPanel({ ext, shortcuts, onDone }: { ext: ExtState; shortcuts: { open: string; flip: string }; onDone: () => void }) {
-  const isChromium = navigator.userAgent.includes("Chrome/");
-  const version = chrome.runtime.getManifest().version;
-  return (
-    <Box px="16" py="12" display="flex" flexDirection="column" gap="16" overflow="auto">
-      <Group justifyContent="space-between" alignItems="center">
-        <Text fontWeight="500">Settings</Text>
-        <Button appearance="subtle" size="sm" onClick={onDone}>
-          Done
-        </Button>
-      </Group>
-      <Switch checked={ext.settings.keepRoute} onCheckedChange={(v) => void setSetting("keepRoute", v)} description="Open the same page on the branch you pick.">
-        Keep the route when switching
-      </Switch>
-      <Switch checked={ext.settings.tabLabels} onCheckedChange={(v) => void setSetting("tabLabels", v)} description="Puts the branch in tab titles and a coloured dot on the tab icon.">
-        Branch names on tabs
-      </Switch>
-      <Switch checked={ext.settings.pagePill} onCheckedChange={(v) => void setSetting("pagePill", v)} description="Shows the branch at the bottom of preview pages, with a way back.">
-        Branch pill on preview pages
-      </Switch>
-      <Box display="flex" flexDirection="column" gap="8">
-        <Text fontSize="sm" fontWeight="500">
-          Keyboard shortcuts
-        </Text>
-        <Group justifyContent="space-between" alignItems="center">
-          <Text fontSize="sm">Open Branch Hop</Text>
-          {shortcuts.open ? <Kbd>{shortcuts.open}</Kbd> : <Text fontSize="sm" color="fg.tertiary">Not set</Text>}
-        </Group>
-        <Group justifyContent="space-between" alignItems="center">
-          <Text fontSize="sm">Flip back to the last branch</Text>
-          {shortcuts.flip ? <Kbd>{shortcuts.flip}</Kbd> : <Text fontSize="sm" color="fg.tertiary">Not set</Text>}
-        </Group>
-        {isChromium && (
-          <Box>
-            <Button appearance="default" size="sm" onClick={() => void chrome.tabs.create({ url: "chrome://extensions/shortcuts" })}>
-              Change shortcuts
-            </Button>
-          </Box>
-        )}
-      </Box>
-      <Text fontSize="sm" color="fg.secondary">
-        Next, with GitHub sign-in: shared lists, comments, and notifications when a branch you follow is updated.
-      </Text>
-      <Group justifyContent="space-between" alignItems="center" gap="8">
-        <Text fontSize="sm" color="fg.tertiary">
-          Branch Hop {version}. Favorites and history stay in this browser.
-        </Text>
-        <Button
-          appearance="default"
-          size="sm"
-          onClick={() =>
-            void clearRecent().then(
-              () => toaster.create("Recent history cleared"),
-              () => toaster.create("Couldn't clear history", { intent: "danger" }),
-            )
-          }
-        >
-          Clear history
-        </Button>
-      </Group>
     </Box>
   );
 }

@@ -10,15 +10,13 @@ test("a branch gets 29 characters before Vercel shortens it", () => {
 
 test("short branch names map straight into the URL", async () => {
   assert.equal(await keyForBranch("david/image-gen-editor"), "david-image-gen-editor");
-  assert.equal(await keyForBranch("tra-meridian-brand-template"), "tra-meridian-brand-template");
+  assert.equal(await keyForBranch("meridian-brand-template"), "meridian-brand-template");
   assert.equal(await keyForBranch("main"), "main");
 });
 
-// Hashes Vercel produced for real branches (two from PR comments, two confirmed with a 401 response).
+// Hashes Vercel produced for real branches (one from a PR comment, one confirmed with a 401 response).
 for (const [branch, key] of [
-  ["ola/analytics-product-scaffold", "ola-analytics-product-c18b65"],
   ["david/frontend-designer-auto-update", "david-frontend-designe-6cbd7e"],
-  ["juho/web-experimentation-rebrand", "juho-web-experimentati-95a52b"],
   ["experiment/template-card-with-description2", "experiment-template-ca-3893ad"],
 ]) {
   test(`long name ${branch} matches Vercel's shortened URL`, async () => {

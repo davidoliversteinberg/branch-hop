@@ -1,6 +1,12 @@
 import { flipTab } from "../shared/nav";
+import { cleanRequest, type Request, type Result } from "../shared/messages.ts";
 import { parsePreviewUrl } from "../shared/preview";
 import { clearTabState, getNames, getTabState, recordVisit, setTabState } from "../shared/store";
+import { POLL_ALARM, cancelSignIn, getStatus, isSignedIn, pollOnce, signOut, startSignIn, whenSignedIn } from "./auth.ts";
+import { GhError } from "./gh.ts";
+import { SYNC_ALARM, addComment, listComments, markRead, onNoticeClick, share, sync, unshare, updateBadge } from "./shared.ts";
+
+const SYNC_MINUTES = 2;
 
 /* Remember each tab's branch so "flip back" knows where it came from. */
 async function onTabUrl(tabId: number, url: string): Promise<void> {
@@ -28,13 +34,89 @@ chrome.commands.onCommand.addListener((command, tab) => {
   })();
 });
 
-/* Requests from the page pill. Only this extension's script on an Axiom Play preview may ask. */
+/* Shared lists stay fresh in the background while you're signed in. */
+async function startSyncing(): Promise<void> {
+  await chrome.alarms.create(SYNC_ALARM, { periodInMinutes: SYNC_MINUTES });
+  await sync();
+}
+
+whenSignedIn(() => void startSyncing());
+
+async function resume(): Promise<void> {
+  if (await isSignedIn()) await startSyncing();
+  await updateBadge();
+}
+chrome.runtime.onStartup.addListener(() => void resume());
+chrome.runtime.onInstalled.addListener(() => void resume());
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === POLL_ALARM) void pollOnce();
+  if (alarm.name === SYNC_ALARM) void sync();
+});
+
+chrome.notifications?.onClicked.addListener((id) => void onNoticeClick(id));
+chrome.notifications?.onButtonClicked.addListener((id, button) => void onNoticeClick(id, button));
+
+async function endSession(message?: string): Promise<void> {
+  await signOut(message);
+  await chrome.alarms.clear(SYNC_ALARM);
+  await updateBadge();
+}
+
+/* Requests from the popup */
+async function handle(req: Request): Promise<unknown> {
+  switch (req.type) {
+    case "auth-status":
+      return getStatus();
+    case "auth-start":
+      return startSignIn();
+    case "auth-cancel":
+      return cancelSignIn();
+    case "sign-out":
+      return endSession();
+    case "sync":
+      return sync();
+    case "share":
+      return share(req);
+    case "unshare":
+      return unshare(req.issue);
+    case "comments":
+      return listComments(req.issue);
+    case "comment":
+      return addComment(req.issue, req.body);
+    case "mark-read":
+      return markRead(req.issues);
+  }
+}
+
+const fromExtensionPage = (sender: chrome.runtime.MessageSender) =>
+  sender.id === chrome.runtime.id && !sender.tab && typeof sender.url === "string" && sender.url.startsWith(chrome.runtime.getURL(""));
+
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false;
+
+  // The popup: GitHub requests, validated against a fixed list.
+  if (fromExtensionPage(sender)) {
+    const req = cleanRequest(message);
+    if (!req) {
+      sendResponse({ ok: false, error: "Branch Hop didn't understand that request." } satisfies Result<never>);
+      return false;
+    }
+    handle(req).then(
+      (data) => sendResponse({ ok: true, data: data ?? null } satisfies Result<unknown>),
+      (err: unknown) => {
+        const e = err instanceof GhError ? err : null;
+        if (e?.code === "signed-out") void endSession(e.message);
+        sendResponse({ ok: false, error: err instanceof Error ? err.message : "Something went wrong.", code: e?.code } satisfies Result<never>);
+      },
+    );
+    return true;
+  }
+
+  // The page pill: only this extension's own script on an Axiom Play preview may ask.
   const tabId = sender.tab?.id;
   const fromPreview = typeof sender.url === "string" && parsePreviewUrl(sender.url) !== null;
   if (tabId == null || !fromPreview || !message || typeof message !== "object") return false;
-
   const type = (message as { type?: unknown }).type;
   if (type === "tab-info") {
     void Promise.all([getTabState(tabId), getNames()]).then(
