@@ -1,9 +1,10 @@
 import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, Box, Button, Checkbox, Field, Group, Input, SegmentedControl, SegmentedControlItem, Switch, Text, Textarea, toaster } from "@optiaxiom/react";
-import { IconArrowUpRightFromSquare, IconChevronLeft } from "@optiaxiom/icons";
-import { COMMENT_MAX, SHARED_NOTE_MAX, SHARED_REPO_NAME, cleanListName, isSharedIssueUrl, isSsoUrl, spaceUrl, type IssueComment, type SharedBranch } from "../shared/github.ts";
+import { IconArrowUpRightFromSquare } from "@optiaxiom/icons";
+import { COMMENT_MAX, JOIN, SHARED_NOTE_MAX, SHARED_REPO_NAME, cleanListName, isSharedIssueUrl, isSsoUrl, spaceUrl, type IssueComment, type SharedBranch } from "../shared/github.ts";
 import type { AuthStatus, SharedState, Space } from "../shared/messages.ts";
 import { setMuted } from "../shared/store";
+import { ViewHeader } from "./BranchBits";
 import { ago } from "./items";
 import { send } from "./useGitHub";
 
@@ -60,7 +61,7 @@ export function SignInCard({ auth, onSignIn }: { auth: AuthStatus; onSignIn: () 
     <Box px="16" py="16" display="flex" flexDirection="column" gap="8" alignItems="start">
       <Text fontWeight="500">Share branches with your team</Text>
       <Text fontSize="sm" color="fg.secondary">
-        Sign in with GitHub to see branches shared with you, share your own, and talk about them. Branch Hop can only read and write issues in the branch-hop-shared repo.
+        Sign in with GitHub to see branches teammates share with you, share your own, and comment on them. Branch Hop can only read and write issues in {SHARED_REPO_NAME} repos.
       </Text>
       {auth.state === "signed-out" && auth.message && (
         <Text fontSize="sm" color="fg.warning.strong">
@@ -88,32 +89,41 @@ export function SignInCard({ auth, onSignIn }: { auth: AuthStatus; onSignIn: () 
 /* When no shared space can be read */
 export function AccessCard({ shared, onRetry }: { shared: SharedState; onRetry: () => void }) {
   const sso = shared.spaces.find((sp) => sp.status === "sso");
-  const installed = shared.installedOn.length ? shared.installedOn.map((a) => `@${a}`).join(", ") : "nowhere yet";
+  const join = !sso && (shared.status === "no-space" || shared.status === "no-access");
   const copy: Record<string, [string, string]> = {
-    "no-space": [
-      "No shared space yet",
-      `Shared branches live in a GitHub repo called ${SHARED_REPO_NAME}, in your team's organization or your own account. The Branch Hop app is installed on: ${installed}. Ask your team's GitHub owner to install it on that repo, or create one and install the app there.`,
+    join: [
+      "You're not in a shared space yet",
+      `Shared branches live in a private GitHub repo. Ask to join ${JOIN.owner}'s space. GitHub emails you an invite, and this tab fills in a minute after you accept it.`,
     ],
-    "no-access": ["You can't see the shared space yet", `Ask whoever set up Branch Hop to add you to the ${SHARED_REPO_NAME} repo, or to install the Branch Hop app on it.`],
     "no-permission": ["Branch Hop's GitHub App is missing a permission", `In the app's settings on GitHub, set Issues to Read and write, then accept the change for ${SHARED_REPO_NAME}.`],
     sso: ["Single sign-on needed", "Your organization asks you to sign in with its single sign-on before Branch Hop can see the shared space."],
     "rate-limited": ["GitHub needs a short break", "GitHub's rate limit was reached. Branch Hop will try again in a few minutes."],
     offline: ["Branch Hop can't reach GitHub", shared.message ?? "Check your connection and try again."],
   };
-  const [title, body] = copy[sso ? "sso" : shared.status] ?? copy.offline;
+  const [title, body] = copy[sso ? "sso" : join ? "join" : shared.status] ?? copy.offline;
   return (
     <Box px="16" py="16" display="flex" flexDirection="column" gap="8" alignItems="start">
       <Text fontWeight="500">{title}</Text>
       <Text fontSize="sm" color="fg.secondary">
         {body}
       </Text>
-      <Group gap="8" pt="4">
+      <Group gap="8" pt="4" flexWrap="wrap">
         {sso?.ssoUrl && isSsoUrl(sso.ssoUrl) && (
           <Button appearance="primary" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => void chrome.tabs.create({ url: sso.ssoUrl })}>
             Sign in with SSO
           </Button>
         )}
-        <Button appearance="default" onClick={onRetry}>
+        {join && (
+          <>
+            <Button appearance="primary" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => void chrome.tabs.create({ url: JOIN.requestUrl })}>
+              Request access
+            </Button>
+            <Button appearance="default" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => void chrome.tabs.create({ url: JOIN.invitesUrl })}>
+              Accept invite
+            </Button>
+          </>
+        )}
+        <Button appearance="subtle" onClick={onRetry}>
           Try again
         </Button>
       </Group>
@@ -146,15 +156,23 @@ export function SharePanel({ target, spaces, items, me, onClose }: { target: Sha
   const space = usable.find((sp) => sp.owner === owner);
   if (!space) {
     return (
-      <Box px="16" py="16" display="flex" flexDirection="column" gap="8" alignItems="start">
-        <Text fontWeight="500">No shared space to share into</Text>
-        <Text fontSize="sm" color="fg.secondary">
-          Open the Shared tab to see what Branch Hop can reach.
-        </Text>
-        <Button appearance="default" onClick={onClose}>
-          Back
-        </Button>
-      </Box>
+      <>
+        <ViewHeader title={`Share ${target.title}`} onBack={onClose} />
+        <Box px="16" py="16" display="flex" flexDirection="column" gap="8" alignItems="start">
+          <Text fontWeight="500">No shared space to share into</Text>
+          <Text fontSize="sm" color="fg.secondary">
+            Sharing needs a shared space. Ask to join {JOIN.owner}'s, then accept the invite GitHub emails you.
+          </Text>
+          <Group gap="8" pt="4">
+            <Button appearance="primary" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => void chrome.tabs.create({ url: JOIN.requestUrl })}>
+              Request access
+            </Button>
+            <Button appearance="subtle" onClick={onClose}>
+              Back
+            </Button>
+          </Group>
+        </Box>
+      </>
     );
   }
   return (
@@ -170,7 +188,7 @@ export function SharePanel({ target, spaces, items, me, onClose }: { target: Sha
           <SegmentedControl type="single" value={owner} aria-label="Share in" onValueChange={(v: string) => v && setOwner(v)}>
             {usable.map((sp) => (
               <SegmentedControlItem key={sp.owner} value={sp.owner} style={{ flex: 1 }}>
-                {sp.org ? sp.owner : `${sp.owner} (you)`}
+                {sp.org ? sp.owner : sp.owner === me ? "Your space" : `${sp.owner}'s space`}
               </SegmentedControlItem>
             ))}
           </SegmentedControl>
@@ -257,16 +275,13 @@ function ShareForm({
   }
 
   return (
-    <Box asChild display="flex" flexDirection="column" gap="16" px="16" py="12" overflow="auto">
+    <>
+    <ViewHeader title={`${existing ? "Update sharing" : "Share"} ${target.title}`} onBack={onClose} />
+    <Box asChild display="flex" flexDirection="column" gap="16" px="16" py="12" overflow="auto" style={{ flex: "1 1 auto", minHeight: 0 }}>
       <form onSubmit={(e) => void submit(e)}>
-        <Group justifyContent="space-between" alignItems="center" gap="8">
-          <Text fontWeight="500" truncate title={target.title}>
-            {existing ? "Update sharing" : "Share"} · {target.title}
-          </Text>
-          <Button appearance="subtle" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-        </Group>
+        <Text fontSize="sm" fontFamily="mono" color="fg.secondary" truncate title={target.route}>
+          {target.route}
+        </Text>
 
         {picker}
 
@@ -341,6 +356,7 @@ function ShareForm({
         </Group>
       </form>
     </Box>
+    </>
   );
 }
 
@@ -379,12 +395,10 @@ export function CommentsPanel({ shared, title, me, muted, onClose }: { shared: S
   const sharedWith = shared.sharedWith.filter((l) => l !== shared.sharedBy);
   return (
     <Box display="flex" flexDirection="column" style={{ minHeight: 0, flex: "1 1 auto" }}>
-      <Box px="12" pt="8" pb="8" display="flex" flexDirection="column" gap="4" borderB="1" borderColor="border.secondary">
-        <Group gap="4" alignItems="center">
-          <Button appearance="subtle" size="sm" aria-label="Back to the list" icon={<IconChevronLeft />} onClick={onClose} />
-          <Text fontWeight="500" truncate title={title} style={{ flex: 1 }}>
-            {title}
-          </Text>
+      <ViewHeader
+        title={title}
+        onBack={onClose}
+        end={
           <Button
             appearance="subtle"
             size="sm"
@@ -396,13 +410,15 @@ export function CommentsPanel({ shared, title, me, muted, onClose }: { shared: S
           >
             GitHub
           </Button>
-        </Group>
-        <Text fontSize="sm" color="fg.secondary" px="4">
+        }
+      />
+      <Box px="16" pt="8" pb="12" display="flex" flexDirection="column" gap="4" borderB="1" borderColor="border.secondary">
+        <Text fontSize="sm" color="fg.secondary">
           Shared by @{shared.sharedBy}
           {sharedWith.length ? ` with ${sharedWith.map((l) => `@${l}`).join(", ")}` : ""}
         </Text>
         {shared.note && (
-          <Text fontSize="sm" px="4" style={{ whiteSpace: "pre-wrap" }}>
+          <Text fontSize="sm" style={{ whiteSpace: "pre-wrap" }}>
             {shared.note}
           </Text>
         )}

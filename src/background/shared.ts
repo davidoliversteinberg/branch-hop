@@ -20,7 +20,7 @@ import {
 } from "../shared/github.ts";
 import { EMPTY_SHARED, cleanPerson, cleanSharedState, cleanUnread, type SharedState, type SharedStatus, type Space, type Unread } from "../shared/messages.ts";
 import { previewUrl } from "../shared/preview.ts";
-import { getFavorites, getMuted, getSettings } from "../shared/store.ts";
+import { getFavorites, getMuted, getPins, getSettings } from "../shared/store.ts";
 import { gh, ghAll, GhError, repoPath } from "./gh.ts";
 
 const local = chrome.storage.local;
@@ -237,10 +237,11 @@ async function assignedBy(space: string, issue: number, login: string): Promise<
 }
 
 async function detectEvents(space: string, items: SharedBranch[], login: string): Promise<void> {
-  const [settings, snapshots, favorites, muted, participated, notifiedRaw] = await Promise.all([
+  const [settings, snapshots, favorites, pins, muted, participated, notifiedRaw] = await Promise.all([
     getSettings(),
     getSnapshots(),
     getFavorites(),
+    getPins(),
     getMuted(),
     participatedSet(),
     local.get(K.notified),
@@ -264,7 +265,8 @@ async function detectEvents(space: string, items: SharedBranch[], login: string)
       .filter((c) => c.space === space);
     for (const c of comments) if (c.author === login) participated.add(issueId(space, c.issue));
     if (settings.notifyComments) {
-      const favoriteKeys = new Set(favorites.map((f) => f.key));
+      // Following: bookmarked and pinned branches count, as favorites did before 0.4.
+      const favoriteKeys = new Set([...favorites.map((f) => f.key), ...pins.map((p) => p.key)]);
       const mutedKeys = new Set(muted);
       const follows = (i: SharedBranch) =>
         !mutedKeys.has(i.key) && (i.sharedWith.includes(login) || i.sharedBy === login || participated.has(issueId(space, i.number)) || favoriteKeys.has(i.key));

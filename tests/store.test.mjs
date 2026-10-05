@@ -103,8 +103,10 @@ test("recent keeps every page, newest first, one entry per page", async () => {
   ]);
 });
 
-test("keep route is off unless you turn it on", async () => {
-  assert.equal((await store.getSettings()).keepRoute, false);
+test("branches open in this tab, and branch status stays off, until you turn them on", async () => {
+  const s = await store.getSettings();
+  assert.equal(s.newTab, false);
+  assert.equal(s.branchStatus, false);
 });
 
 test("settings fall back to defaults and ignore non-boolean values", async () => {
@@ -119,4 +121,51 @@ test("muted branches are validated and de-duplicated", async () => {
   assert.deepEqual(await store.getMuted(), ["main"]);
   await store.setMuted("main", false);
   assert.deepEqual(await store.getMuted(), []);
+});
+
+test("pins round-trip and reject bad keys", async () => {
+  await store.pinBranch({ key: "opticon-mx", addedAt: 5 });
+  await assert.rejects(store.pinBranch({ key: "Not A Key", addedAt: 1 }));
+  assert.deepEqual(await store.getPins(), [{ key: "opticon-mx", name: undefined, addedAt: 5 }]);
+});
+
+test("forgetting a branch removes its pin, bookmarks and history, and restoring puts them back", async () => {
+  await store.pinBranch({ key: "opticon-mx", addedAt: 1 });
+  await store.saveFavorite({ key: "opticon-mx", route: "/opal/messages", note: "Messages", addedAt: 2 });
+  await store.saveFavorite({ key: "main", route: "/", addedAt: 3 });
+  await store.recordVisit({ key: "opticon-mx", route: "/opal/messages?conversation=cb", at: 10 });
+  await store.recordVisit({ key: "main", route: "/", at: 11 });
+
+  const snapshot = await store.forgetBranch("opticon-mx", { visits: true });
+  assert.equal(snapshot.favorites.length, 1);
+  assert.deepEqual((await store.getPins()).map((p) => p.key), []);
+  assert.deepEqual((await store.getFavorites()).map((f) => f.key), ["main"]);
+  assert.deepEqual((await store.getRecent()).map((v) => v.key), ["main"]);
+
+  await store.restoreBranch(snapshot);
+  assert.deepEqual((await store.getPins()).map((p) => p.key), ["opticon-mx"]);
+  assert.equal((await store.getFavorites()).find((f) => f.key === "opticon-mx")?.note, "Messages");
+  assert.deepEqual((await store.getRecent()).map((v) => v.key), ["main", "opticon-mx"]);
+});
+
+test("unpinning keeps history", async () => {
+  await store.pinBranch({ key: "opticon-mx", addedAt: 1 });
+  await store.recordVisit({ key: "opticon-mx", route: "/", at: 10 });
+  await store.forgetBranch("opticon-mx", { visits: false });
+  assert.deepEqual((await store.getRecent()).map((v) => v.key), ["opticon-mx"]);
+});
+
+test("a pre-0.3.1 favorite without a page or note only marks the branch", async () => {
+  await globalThis.chrome.storage.sync.set({ "fav:main": { key: "main", addedAt: 1 }, "fav:meridian": { key: "meridian", route: "/site", note: "Review", addedAt: 1 } });
+  const favs = await store.getFavorites();
+  assert.equal(store.isBranchOnly(favs.find((f) => f.key === "main")), true);
+  assert.equal(store.isBranchOnly(favs.find((f) => f.key === "meridian")), false);
+});
+
+test("settings drop the removed keep-route option and default the new ones", async () => {
+  await globalThis.chrome.storage.sync.set({ settings: { keepRoute: true, newTab: true } });
+  const s = await store.getSettings();
+  assert.equal("keepRoute" in s, false);
+  assert.equal(s.newTab, true);
+  assert.equal(s.branchStatus, false);
 });

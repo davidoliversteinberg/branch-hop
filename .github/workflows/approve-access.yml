@@ -1,0 +1,55 @@
+# Invites whoever opened an access request to the private branch-hop-shared repo,
+# when the repo owner replies "/approve" on it. Setup: docs/access.md.
+name: Approve access request
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+
+jobs:
+  invite:
+    # Only the owner's "/approve", only on access requests, never on pull requests.
+    if: >-
+      github.event.issue.pull_request == null &&
+      github.event.comment.author_association == 'OWNER' &&
+      startsWith(github.event.comment.body, '/approve') &&
+      contains(github.event.issue.labels.*.name, 'access-request')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invite the requester
+        # actions/github-script v9.0.0, pinned to its commit
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        env:
+          INVITE_TOKEN: ${{ secrets.SHARED_INVITE_TOKEN }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.issue.number;
+            // The person who opened the request, never anything typed into it.
+            const username = context.payload.issue.user.login;
+            const say = (body) => github.rest.issues.createComment({ owner, repo, issue_number, body });
+            if (!/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/.test(username)) {
+              await say("Couldn't read the requester's GitHub username, so no invite was sent.");
+              return;
+            }
+            if (!process.env.INVITE_TOKEN) {
+              await say("The SHARED_INVITE_TOKEN secret isn't set, so no invite was sent. See docs/access.md.");
+              core.setFailed("SHARED_INVITE_TOKEN is missing");
+              return;
+            }
+            const inviter = github.getOctokit(process.env.INVITE_TOKEN);
+            try {
+              const res = await inviter.rest.repos.addCollaborator({ owner, repo: "branch-hop-shared", username, permission: "push" });
+              await say(
+                res.status === 201
+                  ? `Invited @${username}. Accept the invite at https://github.com/${owner}/branch-hop-shared/invitations (GitHub emailed it too), and Branch Hop's Shared tab fills in within a couple of minutes.`
+                  : `@${username} already has access. If Shared is still empty, open Branch Hop and click Try again.`,
+              );
+              await github.rest.issues.update({ owner, repo, issue_number, state: "closed", state_reason: "completed" });
+            } catch (err) {
+              await say(`Couldn't send the invite (${err.status ?? "error"}). Check that SHARED_INVITE_TOKEN can manage collaborators on branch-hop-shared.`);
+              core.setFailed(String(err.message ?? err));
+            }

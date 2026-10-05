@@ -34,16 +34,15 @@ The app's Client ID (it starts with `Iv`) is public. It's set as `GITHUB.clientI
 
 ## Set up a team space in an organization
 
-1. Create an **internal** repo named `branch-hop-shared` in the organization. Internal means every member can see it, so nobody needs inviting. (Done for `episerver`.)
+1. Create an **internal** repo named `branch-hop-shared` in the organization. Internal means every member can see it, so nobody needs inviting. (`episerver/branch-hop-shared` exists, but the app isn't approved for that organization, so the personal space is the one that works today.)
 2. Open the app's public install page, `https://github.com/apps/branch-hop/installations/new`, choose the organization, pick **Only select repositories** › `branch-hop-shared`, and submit. If you aren't an owner, GitHub sends the owners a request instead.
 3. Once an owner approves, everyone in the organization sees the team space in Branch Hop after signing in.
 
 ## Adding teammates to a personal space
 
-Invite each person as a collaborator on two repos:
+People can ask to join from inside Branch Hop, and you approve with one reply: see [access.md](access.md). To add someone by hand:
 
-- `branch-hop`, so they can download releases
-- `branch-hop-shared`, so they can see and share branches
+Invite each person as a collaborator on `branch-hop-shared`, with the Write role, so they can see and share branches. (`branch-hop` is public, so anyone can download releases.)
 
 They install the extension, click **Sign in with GitHub**, and approve the code GitHub shows them. Nobody has to approve anything else.
 

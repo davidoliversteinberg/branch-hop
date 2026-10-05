@@ -1,35 +1,41 @@
 # Branch Hop
 
-A Chrome and Safari extension for Axiom Play previews. Switch to any branch without leaving the page you're on, keep favorite pages with notes, and share branches with your team.
+A Chrome and Safari extension for Axiom Play previews. Hop between branches, pin the ones you work on, bookmark the pages you come back to, clear out merged ones, and share branches with your team.
 
 ## What it does
 
-**Without signing in**
+Branch Hop is a personal open-source project, built for coworkers who review Axiom Play prototypes. It isn't an official Optimizely tool.
 
-- Shows which branch and page the current tab is on, with a **Save this page** button.
-- Every row opens its own page. Turn on **Keep route** to open the page you're on, on the branch you pick instead. Favorites always open the page you saved.
-- **Favorites**: star the pages you work on, as many per branch as you like, and add a short note to each. A favorite always opens the page you saved.
-- **Recent**: every preview page you open in this browser, picked up automatically, including several pages on the same branch.
-- Opens any branch you type or paste, including long names. Vercel shortens those and adds a hash; Branch Hop works out the same hash and checks that the preview exists before opening it.
-- Puts the branch name in tab titles and a coloured dot on the tab icon.
-- Adds a small branch pill to preview pages, with a button to flip back to the previous branch.
-- When a route doesn't exist on the branch you picked (the page is a 404), offers that branch's start page.
-- Copies a clean link, or a Markdown link for Slack and Jira.
+**The popup has two parts.**
 
-**With GitHub sign-in (0.2)**
+- **This page**, at the top: the branch and page this tab is on, and everything you can do with it. **Bookmark page** keeps this exact page, with an optional note. **Share** sends it to teammates. **Copy** gives you a link, or a Markdown link for Slack and Jira.
+- **The list** below: **Branches** (yours) and **Shared** (your team's). Search covers both. Paste a branch name or a preview link to open any branch, including long names that Vercel shortens and hashes.
+
+**Branches** has two sections:
+
+- **Pinned:** branches you're working on, each with its bookmarked pages listed underneath. Pin a branch with the pin on its row. Bookmarking a page pins its branch.
+- **Recent:** every other branch you've opened in this browser, newest first.
+
+Click a branch to go back to where you left off on it. Click a bookmark to open that exact page. Each row's **⋯** menu (or ⌘K on the highlighted row) has the rest: open in a new tab, **open the page you're on** on that branch, pin, share, copy, and remove.
+
+**Merged branches** (optional, in Settings): Branch Hop marks branches whose pull request is merged with nothing pushed since, and branches that are gone from GitHub. One click removes them all. See [Branch status](#branch-status).
+
+**On preview pages**, Branch Hop puts the branch in the tab title, a coloured dot on the tab icon, and a small pill at the bottom with a button to flip back to the previous branch. When a route doesn't exist on the branch you picked (a 404), the pill offers that branch's start page.
+
+**With GitHub sign-in** you also get:
 
 - **Shared**: branches shared with you, then your team's lists (such as "Opal review"), then everything else.
-- **Share** the page you're on, or any branch, with teammates and lists, plus a note about what to look at.
+- **Share** any page or branch with teammates and lists, plus a note about what to look at.
 - **Comments** on each shared branch. They're GitHub issue comments, so they also show up on github.com and in GitHub's own email notifications.
-- **Notifications** when someone shares a branch with you or comments on one you follow. "Following" covers branches shared with you, ones you shared or commented on, and your favorites. Mute a branch from its comments.
-- **Settings** for each kind of notification, and for desktop alerts versus only the count on the toolbar icon.
+- **Notifications** when someone shares a branch with you or comments on one you follow: branches shared with you, ones you shared, commented on or pinned. Mute a branch from its comments.
 
 | Shortcut | Does |
 | --- | --- |
 | ⌥⇧B (Alt+Shift+B) | Open Branch Hop |
 | ⌥⇧F (Alt+Shift+F) | Flip back to the previous branch, same route |
-| ↑ ↓, Enter | Move through the list, open the highlighted branch |
-| ⌘ Enter (Ctrl+Enter) | Open in a new tab, or send a comment |
+| ↑ ↓, Enter | Move through the list, open the highlighted row |
+| ⌘ Enter (Ctrl+Enter) | Open in a new tab (or in this tab, if you set new tabs as the default), or send a comment |
+| ⌘K (Ctrl+K) or Shift+F10 | More actions for the highlighted row |
 
 Change shortcuts at `chrome://extensions/shortcuts`.
 
@@ -48,7 +54,7 @@ No store and no IT request needed.
 3. Click **Load unpacked** and choose the `Documents/Branch Hop` folder.
 4. Pin Branch Hop from the puzzle-piece menu in the toolbar.
 
-**Updating:** Branch Hop checks for new versions on its own. When one is out, its icon shows ↑ and the popup offers **Update**: run the same command again, and Branch Hop reloads itself within a minute. Favorites, settings and your GitHub sign-in stay, because the extension ID is fixed (`cikpnfefgjppclpmndpcalonhgdanado`).
+**Updating:** Branch Hop checks for new versions every few hours. When one is out you get a desktop notification, the icon shows ↑, and the popup offers **Update**: run the same command again, and Branch Hop reloads itself within a minute. Pins, bookmarks, settings and your GitHub sign-in stay, because the extension ID is fixed (`cikpnfefgjppclpmndpcalonhgdanado`). Versions before 0.4 show the ↑ and the popup notice, without the desktop notification.
 
 Chrome may remind you now and then that developer-mode extensions are on. That's expected for extensions installed this way.
 
@@ -64,12 +70,24 @@ You stay signed in. Branch Hop renews its access in the background, and you'd on
 
 ## Shared spaces
 
-Shared branches live in a GitHub repo named `branch-hop-shared`. Branch Hop finds every one it can reach after you sign in, and shows them together:
+Shared branches live in a private GitHub repo named `branch-hop-shared`. Branch Hop finds every one it can reach after you sign in, and shows them together.
 
-- **A team space**, such as `episerver/branch-hop-shared`. It's an internal repo, so everyone in the organization can see it and nobody needs inviting.
-- **A personal space**, such as `davidoliversteinberg/branch-hop-shared`, for people you invite as collaborators.
+**Joining:** the main space is `davidoliversteinberg/branch-hop-shared`. If you're not in it, Branch Hop's Shared tab shows **Request access**. That opens a short form on this repo; the maintainer replies `/approve`, GitHub emails you an invite, and you click **Accept invite**. How it works, and the one-time setup, are in [docs/access.md](docs/access.md).
 
-When you share, you pick the space. Settings lists each space and whether it's working. If an organization uses single sign-on, Branch Hop shows a **Sign in with SSO** button instead of failing quietly. App setup and the one-time organization approval are in [docs/github-app.md](docs/github-app.md).
+**Your own space:** create a private repo named `branch-hop-shared` and install the Branch Hop app on it (see [docs/github-app.md](docs/github-app.md)). People you add as collaborators see it after they sign in. An organization can do the same with one approval from an owner.
+
+When you share, you pick the space. Settings lists each space and whether it's working. If an organization uses single sign-on, Branch Hop shows a **Sign in with SSO** button instead of failing quietly.
+
+## Branch status
+
+Turn on **Settings › Branch status › Show merged branches** to mark branches you can clear out:
+
+- **Merged:** its newest pull request is merged and nothing was pushed after. Axiom Play keeps branches after merging, and some get merged more than once, so a merge alone doesn't count.
+- **Deleted:** the branch is gone from GitHub and was never merged.
+
+`episerver/axiom-play` is internal, so Branch Hop reads it the way you would: on github.com, with the sign-in already in your browser. It asks for exactly two read-only pages, the repo's branch search and its pull request search, for your pinned and recent branches (up to 40), at most every 30 minutes. It never writes anything, never reads or stores your cookies, and never asks for any other page. If you're signed out of github.com, or your account can't see axiom-play, Settings says so and nothing is marked.
+
+These are GitHub's own page data, not its documented API, so a GitHub change could stop them working. If that happens, Settings says so and Branch Hop marks nothing, rather than marking something wrongly. Safari may not send your github.com sign-in with these requests; Settings shows that too.
 
 ## Install in Safari
 
@@ -107,12 +125,12 @@ Load `dist/` with **Load unpacked**. The popup uses Axiom React 3.1.6, the versi
 - **No passwords or secrets.** Sign-in uses GitHub's device flow, and the app has no client secret or private key.
 - **Tokens stay in the background worker.** The 8-hour access token lives in session storage. The refresh token lives in the extension's own IndexedDB, which page scripts can't reach. Neither is synced, logged or put in a URL. **Sign out** deletes both; you can also revoke the app under GitHub **Settings › Applications**.
 - **Exact page matching.** The page script runs only on `axiom-play-git-*-optimizely-sandbox.vercel.app`. Browser match patterns can't be that narrow, so the manifest asks for `*.vercel.app` and the code checks the exact host before doing anything.
-- **github.com access is for sign-in only.** The extension calls GitHub's sign-in and API endpoints without your github.com cookies, and never runs scripts on github.com pages.
+- **github.com access.** Sign-in and sharing call GitHub without your github.com cookies, and Branch Hop never runs scripts on github.com pages. The one exception is **Branch status**, which is off until you turn it on: it reads axiom-play's branch and pull request search pages with your browser's github.com sign-in, read-only, from a fixed allowlist of two pages.
 - **Only safe links open.** Branch Hop only opens preview URLs it builds itself, and issue links in `branch-hop-shared`. Anything a teammate puts in an issue is checked against the same rules.
 - **Untrusted text stays text.** Branch names, notes and comments are shown as plain text, never as HTML. Everything read back from storage or GitHub is validated.
-- **No analytics or remote code.** Favorites and settings sync through your browser profile; history and shared-branch data stay on this computer.
+- **No analytics or remote code.** Pins, bookmarks and settings sync through your browser profile; history, branch status and shared-branch data stay on this computer.
 - **Permissions:** `storage`, `alarms` (background checks), `notifications`, and access to `*.vercel.app`, `github.com` and `api.github.com`.
 
 ## What's next
 
-- **Axiom Play data (0.3):** the full branch list, PR titles, build status, and notifications when a branch you follow gets new commits or its build finishes. This needs a second GitHub App with read-only access to `episerver/axiom-play`, installed once by an `episerver` org owner. Keeping it separate means the org never grants write access to anything.
+- **Local builds:** treat `localhost:3000` as a branch, so you can hop the same page between your local build and any preview. It needs one more permission (`http://localhost/*`), so Chrome will ask everyone to approve it on update.

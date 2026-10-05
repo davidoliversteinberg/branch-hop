@@ -15,6 +15,16 @@ export const SHARED_REPO_NAME = "branch-hop-shared";
 /** Shown in help text when nobody has set up a space yet. */
 export const PERSONAL_SPACE_EXAMPLE = "davidoliversteinberg";
 
+/**
+ * Joining the maintainer's space: you ask on the public branch-hop repo, the maintainer replies
+ * /approve, and a workflow there sends the GitHub invite (see docs/access.md).
+ */
+export const JOIN = {
+  owner: PERSONAL_SPACE_EXAMPLE,
+  requestUrl: `https://github.com/${PERSONAL_SPACE_EXAMPLE}/branch-hop/issues/new?template=access-request.yml`,
+  invitesUrl: `https://github.com/${PERSONAL_SPACE_EXAMPLE}/${SHARED_REPO_NAME}/invitations`,
+} as const;
+
 export const GITHUB_ORIGINS = ["https://github.com/*", "https://api.github.com/*"];
 export const spaceUrl = (owner: string) => `${GITHUB.web}/${owner}/${SHARED_REPO_NAME}`;
 
