@@ -1,4 +1,4 @@
-import { GITHUB, LOGIN_RE, SHARED_REPO_NAME, isSsoUrl } from "../shared/github.ts";
+import { GITHUB, SHARED_REPO_NAME, SPACE_OWNER, isSsoUrl } from "../shared/github.ts";
 import type { SharedStatus } from "../shared/messages.ts";
 import { getAccessToken, invalidateAccess } from "./auth.ts";
 
@@ -13,14 +13,14 @@ export class GhError extends Error {
   }
 }
 
-/** Paths inside a shared space (a branch-hop-shared repo). */
+/** Paths inside the shared repo. */
 export function repoPath(owner: string, suffix = ""): string {
-  if (!LOGIN_RE.test(owner)) throw new GhError(0, "Not a valid GitHub account.", "invalid");
+  if (owner !== SPACE_OWNER) throw new GhError(0, "Branch Hop only shares in its own repo.", "invalid");
   return `/repos/${owner}/${SHARED_REPO_NAME}${suffix}`;
 }
 
-// Branch Hop only ever calls these: your profile, the app's installations, and branch-hop-shared repos.
-const ALLOWED = [/^\/user$/, /^\/user\/installations(\/\d+\/repositories)?(\?|$)/, new RegExp(`^/repos/[A-Za-z0-9-]{1,39}/${SHARED_REPO_NAME}(/|\\?|$)`)];
+// Branch Hop only ever calls these: your profile, and the issues of its own repo.
+const ALLOWED = [/^\/user$/, new RegExp(`^/repos/${SPACE_OWNER}/${SHARED_REPO_NAME}/issues(/|\\?|$)`)];
 
 export async function gh(path: string, init: { method?: "GET" | "POST" | "PATCH"; body?: unknown } = {}): Promise<unknown> {
   if (!ALLOWED.some((re) => re.test(path))) throw new GhError(0, "Not a Branch Hop request.", "invalid");
@@ -55,7 +55,7 @@ export async function gh(path: string, init: { method?: "GET" | "POST" | "PATCH"
       const url = /url=([^;\s]+)/.exec(sso)?.[1];
       throw new GhError(403, "This organization needs you to sign in with single sign-on first.", "sso", isSsoUrl(url) ? url : undefined);
     }
-    if (res.status === 404) throw new GhError(404, "Branch Hop can't see this shared space.", "no-access");
+    if (res.status === 404) throw new GhError(404, "Branch Hop can't see its shared repo right now.", "no-access");
     if (res.status === 403 || res.status === 429) {
       const limited = res.status === 429 || res.headers.get("x-ratelimit-remaining") === "0";
       throw limited

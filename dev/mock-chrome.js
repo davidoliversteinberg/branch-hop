@@ -1,12 +1,12 @@
 // Stand-in for the extension APIs so the built popup can be rendered in a normal page.
 // Sample data only; the people in it are made up.
-// Query options: ?tab=other  ?empty=1  ?gh=signedout|pending|signedin (default signedin)  ?space=none  ?status=off|signedout  ?update=1
+// Query options: ?tab=other  ?empty=1  ?gh=signedout|pending|signedin (default signedin)  ?space=none (app not installed on the repo)  ?status=off|signedout  ?update=1
 (() => {
   const params = new URLSearchParams(location.search);
   const now = Date.now();
   const min = 60e3;
   const iso = (ms) => new Date(ms).toISOString();
-  const repo = "https://github.com/davidoliversteinberg/branch-hop-shared/issues/";
+  const repo = "https://github.com/davidoliversteinberg/branch-hop/issues/";
   const space = "davidoliversteinberg";
   const me = { login: "davidoliversteinberg", name: "David Steinberg" };
   const ghMode = params.get("gh") ?? "signedin";
@@ -24,7 +24,7 @@
       { space, number: 1, key: "main", route: "/opal/image-gen?artifact=optimizely-hype-to-hero", note: "Baseline for the image gen review", lists: ["Opal review"], sharedWith: [], sharedBy: me.login, comments: 0, createdAt: iso(now - 4 * 1440 * min), updatedAt: iso(now - 2 * 1440 * min), url: repo + 1 },
     ],
   };
-  const noSpace = { status: "no-space", items: [], spaces: [], installedOn: [], fetchedAt: now - 30e3 };
+  const noSpace = { status: "no-permission", items: [], spaces: [{ owner: space, org: false, status: "no-permission", people: [], lists: [] }], installedOn: [], fetchedAt: now - 30e3 };
   const sharedNow = params.get("space") === "none" ? noSpace : shared;
   const statusMode = params.get("status");
   const comments = {

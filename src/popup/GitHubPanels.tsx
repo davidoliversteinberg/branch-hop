@@ -1,7 +1,7 @@
 import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, Box, Button, Checkbox, Field, Group, Input, SegmentedControl, SegmentedControlItem, Switch, Text, Textarea, toaster } from "@optiaxiom/react";
 import { IconArrowUpRightFromSquare } from "@optiaxiom/icons";
-import { COMMENT_MAX, JOIN, SHARED_NOTE_MAX, SHARED_REPO_NAME, cleanListName, isSharedIssueUrl, isSsoUrl, spaceUrl, type IssueComment, type SharedBranch } from "../shared/github.ts";
+import { COMMENT_MAX, LOGIN_RE, SHARED_NOTE_MAX, SHARE_PEOPLE_MAX, SPACE_OWNER, SPACE_URL, SHARED_REPO_NAME, cleanListName, isSharedIssueUrl, isSsoUrl, type IssueComment, type SharedBranch } from "../shared/github.ts";
 import type { AuthStatus, SharedState, Space } from "../shared/messages.ts";
 import { setMuted } from "../shared/store";
 import { ViewHeader } from "./BranchBits";
@@ -61,7 +61,7 @@ export function SignInCard({ auth, onSignIn }: { auth: AuthStatus; onSignIn: () 
     <Box px="16" py="16" display="flex" flexDirection="column" gap="8" alignItems="start">
       <Text fontWeight="500">Share branches with your team</Text>
       <Text fontSize="sm" color="fg.secondary">
-        Sign in with GitHub to see branches teammates share with you, share your own, and comment on them. Branch Hop can only read and write issues in {SHARED_REPO_NAME} repos.
+        Sign in with GitHub to see branches teammates share with you, share your own, and comment on them. Branch Hop only reads and writes issues in {SPACE_OWNER}/{SHARED_REPO_NAME}.
       </Text>
       {auth.state === "signed-out" && auth.message && (
         <Text fontSize="sm" color="fg.warning.strong">
@@ -86,44 +86,29 @@ export function SignInCard({ auth, onSignIn }: { auth: AuthStatus; onSignIn: () 
   );
 }
 
-/* When no shared space can be read */
+/* When the shared repo can't be read */
 export function AccessCard({ shared, onRetry }: { shared: SharedState; onRetry: () => void }) {
   const sso = shared.spaces.find((sp) => sp.status === "sso");
-  const join = !sso && (shared.status === "no-space" || shared.status === "no-access");
   const copy: Record<string, [string, string]> = {
-    join: [
-      "You're not in a shared space yet",
-      `Shared branches live in a private GitHub repo. Ask to join ${JOIN.owner}'s space. GitHub emails you an invite, and this tab fills in a minute after you accept it.`,
-    ],
-    "no-permission": ["Branch Hop's GitHub App is missing a permission", `In the app's settings on GitHub, set Issues to Read and write, then accept the change for ${SHARED_REPO_NAME}.`],
-    sso: ["Single sign-on needed", "Your organization asks you to sign in with its single sign-on before Branch Hop can see the shared space."],
+    "no-permission": ["Sharing isn't set up yet", `Branch Hop's GitHub App needs to be installed on ${SPACE_OWNER}/${SHARED_REPO_NAME}. The maintainer does this once.`],
+    sso: ["Single sign-on needed", "Your organization asks you to sign in with its single sign-on before Branch Hop can read shared branches."],
     "rate-limited": ["GitHub needs a short break", "GitHub's rate limit was reached. Branch Hop will try again in a few minutes."],
     offline: ["Branch Hop can't reach GitHub", shared.message ?? "Check your connection and try again."],
   };
-  const [title, body] = copy[sso ? "sso" : join ? "join" : shared.status] ?? copy.offline;
+  const [title, body] = copy[sso ? "sso" : shared.status] ?? copy.offline;
   return (
     <Box px="16" py="16" display="flex" flexDirection="column" gap="8" alignItems="start">
       <Text fontWeight="500">{title}</Text>
       <Text fontSize="sm" color="fg.secondary">
         {body}
       </Text>
-      <Group gap="8" pt="4" flexWrap="wrap">
+      <Group gap="8" pt="4">
         {sso?.ssoUrl && isSsoUrl(sso.ssoUrl) && (
           <Button appearance="primary" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => void chrome.tabs.create({ url: sso.ssoUrl })}>
             Sign in with SSO
           </Button>
         )}
-        {join && (
-          <>
-            <Button appearance="primary" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => void chrome.tabs.create({ url: JOIN.requestUrl })}>
-              Request access
-            </Button>
-            <Button appearance="default" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => void chrome.tabs.create({ url: JOIN.invitesUrl })}>
-              Accept invite
-            </Button>
-          </>
-        )}
-        <Button appearance="subtle" onClick={onRetry}>
+        <Button appearance="default" onClick={onRetry}>
           Try again
         </Button>
       </Group>
@@ -151,26 +136,21 @@ export type ShareTarget = { key: string; name?: string; title: string; route: st
 
 export function SharePanel({ target, spaces, items, me, onClose }: { target: ShareTarget; spaces: Space[]; items: SharedBranch[]; me: string; onClose: () => void }) {
   const usable = spaces.filter((sp) => sp.status === "ok");
-  const already = usable.find((sp) => items.some((i) => i.space === sp.owner && i.key === target.key));
-  const [owner, setOwner] = useState((already ?? usable[0])?.owner ?? "");
+  const mine = (sp: Space) => items.find((i) => i.space === sp.owner && i.key === target.key && i.sharedBy === me);
+  const [owner, setOwner] = useState((usable.find((sp) => mine(sp)) ?? usable[0])?.owner ?? "");
   const space = usable.find((sp) => sp.owner === owner);
   if (!space) {
     return (
       <>
         <ViewHeader title={`Share ${target.title}`} onBack={onClose} />
         <Box px="16" py="16" display="flex" flexDirection="column" gap="8" alignItems="start">
-          <Text fontWeight="500">No shared space to share into</Text>
+          <Text fontWeight="500">Sharing isn't available right now</Text>
           <Text fontSize="sm" color="fg.secondary">
-            Sharing needs a shared space. Ask to join {JOIN.owner}'s, then accept the invite GitHub emails you.
+            Branch Hop couldn't read {SPACE_OWNER}/{SHARED_REPO_NAME} on its last sync. Open the Shared tab and click Try again.
           </Text>
-          <Group gap="8" pt="4">
-            <Button appearance="primary" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => void chrome.tabs.create({ url: JOIN.requestUrl })}>
-              Request access
-            </Button>
-            <Button appearance="subtle" onClick={onClose}>
-              Back
-            </Button>
-          </Group>
+          <Button appearance="default" onClick={onClose}>
+            Back
+          </Button>
         </Box>
       </>
     );
@@ -180,7 +160,7 @@ export function SharePanel({ target, spaces, items, me, onClose }: { target: Sha
       key={space.owner}
       target={target}
       space={space}
-      existing={items.find((i) => i.space === space.owner && i.key === target.key)}
+      existing={mine(space)}
       me={me}
       onClose={onClose}
       picker={
@@ -215,10 +195,30 @@ function ShareForm({
 }) {
   const people = space.people;
   const lists = space.lists;
-  const others = useMemo(() => people.filter((p) => p.login !== me), [people, me]);
   const already = useMemo(() => new Set(existing?.sharedWith ?? []), [existing]);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [chosenLists, setChosenLists] = useState<Set<string>>(new Set(existing?.lists ?? []));
+  const [extraPeople, setExtraPeople] = useState<string[]>([]);
+  const [username, setUsername] = useState("");
+  const others = useMemo(() => {
+    const known = people.filter((p) => p.login !== me);
+    return [...known, ...extraPeople.filter((l) => !known.some((p) => p.login === l)).map((login) => ({ login }) as { login: string; name?: string })];
+  }, [people, me, extraPeople]);
+  const addPerson = () => {
+    const login = username.trim().replace(/^@/, "");
+    if (!LOGIN_RE.test(login)) {
+      toaster.create("That isn't a GitHub username.", { intent: "warning" });
+      return;
+    }
+    if (login.toLowerCase() === me.toLowerCase()) return setUsername("");
+    if (chosen.size + already.size >= SHARE_PEOPLE_MAX) {
+      toaster.create(`You can share with up to ${SHARE_PEOPLE_MAX} people.`, { intent: "warning" });
+      return;
+    }
+    setExtraPeople((l) => (l.includes(login) ? l : [...l, login]));
+    setChosen((s) => new Set(s).add(login));
+    setUsername("");
+  };
   const [newList, setNewList] = useState("");
   const [note, setNote] = useState(existing?.note ?? target.note ?? "");
   const [busy, setBusy] = useState(false);
@@ -279,9 +279,14 @@ function ShareForm({
     <ViewHeader title={`${existing ? "Update sharing" : "Share"} ${target.title}`} onBack={onClose} />
     <Box asChild display="flex" flexDirection="column" gap="16" px="16" py="12" overflow="auto" style={{ flex: "1 1 auto", minHeight: 0 }}>
       <form onSubmit={(e) => void submit(e)}>
-        <Text fontSize="sm" fontFamily="mono" color="fg.secondary" truncate title={target.route}>
-          {target.route}
-        </Text>
+        <Box display="flex" flexDirection="column" gap="4">
+          <Text fontSize="sm" fontFamily="mono" color="fg.secondary" truncate title={target.route}>
+            {target.route}
+          </Text>
+          <Text fontSize="sm" color="fg.warning.strong">
+            Shares are public issues on GitHub. Anyone on the internet can read them and their comments. The preview itself still needs a Vercel login.
+          </Text>
+        </Box>
 
         {picker}
 
@@ -289,30 +294,37 @@ function ShareForm({
           <Text fontSize="sm" fontWeight="500">
             People
           </Text>
-          {others.length === 0 ? (
-            <>
-              <Text fontSize="sm" color="fg.secondary">
-                Nobody else can see this space yet. Add teammates to {space.owner}/{SHARED_REPO_NAME} and they'll show up here.
-              </Text>
-              <Box>
-                <Button appearance="default" size="sm" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => void chrome.tabs.create({ url: `${spaceUrl(space.owner)}/settings/access` })}>
-                  Add collaborators
-                </Button>
-              </Box>
-            </>
-          ) : (
-            others.map((p) => (
-              <Checkbox
-                key={p.login}
-                checked={already.has(p.login) || chosen.has(p.login)}
-                disabled={already.has(p.login)}
-                description={already.has(p.login) ? "Already shared" : undefined}
-                onCheckedChange={(on) => setChosen((s) => toggle(s, p.login, on))}
-              >
-                {p.name ? `${p.name} (@${p.login})` : `@${p.login}`}
-              </Checkbox>
-            ))
-          )}
+          {others.map((p) => (
+            <Checkbox
+              key={p.login}
+              checked={already.has(p.login) || chosen.has(p.login)}
+              disabled={already.has(p.login)}
+              description={already.has(p.login) ? "Already shared" : undefined}
+              onCheckedChange={(on) => setChosen((s) => toggle(s, p.login, on))}
+            >
+              {p.name ? `${p.name} (@${p.login})` : `@${p.login}`}
+            </Checkbox>
+          ))}
+          <Field label="Add someone" description="Their GitHub username. GitHub notifies them.">
+            <Group gap="8">
+              <Input
+                value={username}
+                maxLength={40}
+                placeholder="e.g. bigmonkiki"
+                onChange={(e) => setUsername(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addPerson();
+                  }
+                }}
+                style={{ flex: 1 }}
+              />
+              <Button appearance="default" onClick={addPerson} disabled={!username.trim()}>
+                Add
+              </Button>
+            </Group>
+          </Field>
         </Box>
 
         <Box display="flex" flexDirection="column" gap="8">
@@ -329,7 +341,7 @@ function ShareForm({
           </Field>
         </Box>
 
-        <Field label="Note">
+        <Field label="Note" description="Public, like everything shared. Leave out customer names and anything confidential.">
           <Textarea value={note} maxLength={SHARED_NOTE_MAX} maxRows={4} placeholder="What should people look at?" onChange={(e) => setNote(e.target.value)} />
         </Field>
 
@@ -463,7 +475,7 @@ export function CommentsPanel({ shared, title, me, muted, onClose }: { shared: S
 
       <Box asChild px="12" py="8" display="flex" flexDirection="column" gap="8" borderT="1" borderColor="border.secondary">
         <form onSubmit={(e) => void post(e)}>
-          <Field label="Add a comment">
+          <Field label="Add a comment" description="Comments are public on GitHub.">
             <Textarea
               value={draft}
               maxLength={COMMENT_MAX}

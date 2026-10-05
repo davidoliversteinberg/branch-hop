@@ -1,7 +1,7 @@
 import { Avatar, Box, Button, Group, Kbd, Separator, Switch, Text, toaster } from "@optiaxiom/react";
 import { IconArrowUpRightFromSquare } from "@optiaxiom/icons";
 import type { ReactNode } from "react";
-import { JOIN, SHARED_REPO_NAME } from "../shared/github.ts";
+import { SHARED_REPO_NAME, SPACE_URL } from "../shared/github.ts";
 import type { AuthStatus, SharedState, SharedStatus, UpdateInfo } from "../shared/messages.ts";
 import { SOURCE_REPO, SOURCE_URL } from "../shared/status.ts";
 import { clearRecent, setSetting } from "../shared/store";
@@ -14,7 +14,7 @@ const SPACE_STATUS: Record<SharedStatus, string> = {
   ok: "Working",
   sso: "Needs single sign-on",
   "no-access": "Can't see it",
-  "no-permission": "App needs Issues permission",
+  "no-permission": "App not installed on the repo",
   "rate-limited": "Waiting for GitHub",
   offline: "Can't reach GitHub",
   "signed-out": "Signed out",
@@ -107,31 +107,20 @@ export function SettingsPanel({
             </>
           )}
           {signedIn &&
-            (shared.spaces.length ? (
-              shared.spaces.map((sp) => (
-                <Group key={sp.owner} justifyContent="space-between" alignItems="center" gap="8">
+            shared.spaces.map((sp) => (
+              <Group key={sp.owner} justifyContent="space-between" alignItems="center" gap="8">
+                <Box display="flex" flexDirection="column" style={{ minWidth: 0 }}>
                   <Text fontSize="sm" truncate>
-                    {sp.owner}/{SHARED_REPO_NAME}
+                    Shares: public issues in {sp.owner}/{SHARED_REPO_NAME}
                   </Text>
-                  <Text fontSize="sm" color={sp.status === "ok" ? "fg.tertiary" : "fg.warning.strong"} style={{ whiteSpace: "nowrap" }}>
+                  <Text fontSize="sm" color={sp.status === "ok" ? "fg.tertiary" : "fg.warning.strong"}>
                     {SPACE_STATUS[sp.status]}
                   </Text>
-                </Group>
-              ))
-            ) : (
-              <>
-                <Text fontSize="sm" color="fg.secondary">
-                  You're not in a shared space yet. Ask to join {JOIN.owner}'s, then accept the invite GitHub emails you.
-                </Text>
-                <Group gap="8">
-                  <Button appearance="default" size="sm" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => openTab(JOIN.requestUrl)}>
-                    Request access
-                  </Button>
-                  <Button appearance="subtle" size="sm" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => openTab(JOIN.invitesUrl)}>
-                    Accept invite
-                  </Button>
-                </Group>
-              </>
+                </Box>
+                <Button appearance="subtle" size="sm" icon={<IconArrowUpRightFromSquare />} iconPosition="end" onClick={() => openTab(`${SPACE_URL}/issues`)}>
+                  GitHub
+                </Button>
+              </Group>
             ))}
         </Section>
 

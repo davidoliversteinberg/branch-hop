@@ -38,7 +38,39 @@ const issue = (over = {}) => ({
 test("issue body round-trips key, name, route and note", () => {
   const body = issueBody({ key: "experiment-template-ca-3893ad", name: "experiment/template-card-with-description2", route: "/analytics?tab=1", note: "Check the cohort chart" });
   assert.match(body, /\*\*Preview:\*\* https:\/\/axiom-play-git-experiment-template-ca-3893ad-optimizely-sandbox\.vercel\.app\/analytics\?tab=1/);
-  assert.deepEqual(parseIssueBody(body), { key: "experiment-template-ca-3893ad", name: "experiment/template-card-with-description2", route: "/analytics?tab=1", note: "Check the cohort chart" });
+  assert.deepEqual(parseIssueBody(body), {
+    key: "experiment-template-ca-3893ad",
+    name: "experiment/template-card-with-description2",
+    route: "/analytics?tab=1",
+    note: "Check the cohort chart",
+    lists: [],
+    people: [],
+  });
+});
+
+test("lists and people live in the issue, and their GitHub-facing lines aren't part of the note", () => {
+  const body = issueBody({ key: "main", route: "/opal", note: "Baseline", lists: ["Opal review"], people: ["bigmonkiki", "alex-designer"] });
+  assert.match(body, /^\*\*For:\*\* @bigmonkiki @alex-designer$/m);
+  assert.match(body, /^\*\*List:\*\* Opal review$/m);
+  const parsed = parseIssueBody(body);
+  assert.deepEqual([parsed.lists, parsed.people, parsed.note], [["Opal review"], ["bigmonkiki", "alex-designer"], "Baseline"]);
+  const shared = parse(issue({ body, assignees: [], labels: [] }));
+  assert.deepEqual([shared.lists, shared.sharedWith], [["Opal review"], ["bigmonkiki", "alex-designer"]]);
+});
+
+test("people and lists from a tampered marker are validated and capped", () => {
+  const people = ["ok-user", "<script>", "-bad", ...Array.from({ length: 20 }, (_, i) => `user${i}`)];
+  const raw = `<!-- branch-hop ${JSON.stringify({ v: 2, key: "main", route: "/", with: people, lists: ["Fine", "<img src=x>"] })} -->`;
+  const parsed = parseIssueBody(raw);
+  assert.equal(parsed.people.length, 10);
+  assert.ok(!parsed.people.includes("<script>") && !parsed.people.includes("-bad"));
+  assert.deepEqual(parsed.lists, ["Fine"]);
+});
+
+test("version 1 shares still read their assignees and labels", () => {
+  const v1 = `<!-- branch-hop ${JSON.stringify({ v: 1, key: "main", route: "/" })} -->\n**Preview:** x`;
+  const shared = parse(issue({ body: v1 }));
+  assert.deepEqual([shared.lists, shared.sharedWith], [["Opal review"], ["davidoliversteinberg"]]);
 });
 
 test("a note edited on GitHub (with Windows line endings) is read back", () => {
@@ -55,7 +87,7 @@ test("tampered markers are ignored", () => {
   const bad = (data) => `<!-- branch-hop ${JSON.stringify(data)} -->`;
   assert.equal(parseIssueBody(bad({ v: 1, key: "evil.example/x", route: "/" })), null);
   assert.equal(parseIssueBody(bad({ v: 1, key: "main", route: "//evil.example" })), null);
-  assert.equal(parseIssueBody(bad({ v: 2, key: "main", route: "/" })), null);
+  assert.equal(parseIssueBody(bad({ v: 3, key: "main", route: "/" })), null);
   assert.equal(parseIssueBody("<!-- branch-hop {not json} -->"), null);
   assert.equal(parseIssueBody("no marker at all"), null);
   assert.equal(parseIssueBody(bad({ v: 1, key: "main", route: "/", name: "has spaces" })).name, undefined);
@@ -107,16 +139,14 @@ test("comments are parsed only for the shared repo", () => {
     id: 99,
     body: "Looks great on mobile",
     user: { login: "alex-designer", avatar_url: "https://avatars.githubusercontent.com/u/1?v=4" },
-    issue_url: "https://api.github.com/repos/davidoliversteinberg/branch-hop-shared/issues/7",
+    issue_url: "https://api.github.com/repos/davidoliversteinberg/branch-hop/issues/7",
     html_url: `${SHARED_REPO_URL}/issues/7#issuecomment-99`,
     created_at: "2026-10-02T10:00:00Z",
     updated_at: "2026-10-02T10:00:00Z",
   };
   assert.equal(parseComment(raw).issue, 7);
   assert.equal(parseComment({ ...raw, issue_url: "https://api.github.com/repos/someone/else/issues/7" }), null);
-  const org = parseComment({ ...raw, issue_url: "https://api.github.com/repos/episerver/branch-hop-shared/issues/3", html_url: "https://github.com/episerver/branch-hop-shared/issues/3#issuecomment-99" });
-  assert.equal(org.space, "episerver");
-  assert.equal(org.url, "https://github.com/episerver/branch-hop-shared/issues/3#issuecomment-99");
+  assert.equal(parseComment({ ...raw, issue_url: "https://api.github.com/repos/davidoliversteinberg/branch-hop-shared/issues/7" }), null);
   assert.equal(parseComment({ ...raw, user: { login: "alex-designer", avatar_url: "https://evil.example/a.png" } }).avatarUrl, undefined);
 });
 
@@ -125,8 +155,9 @@ test("only shared-repo issue links can be opened", () => {
   assert.ok(isSharedIssueUrl(`${SHARED_REPO_URL}/issues/7#issuecomment-99`));
   assert.ok(!isSharedIssueUrl(`${SHARED_REPO_URL}/issues/7/../../settings`));
   assert.ok(!isSharedIssueUrl("https://evil.example/"));
-  assert.ok(isSharedIssueUrl("https://github.com/episerver/branch-hop-shared/issues/12"));
-  assert.ok(!isSharedIssueUrl("https://github.com/episerver/other-repo/issues/12"));
+  assert.ok(!isSharedIssueUrl("https://github.com/episerver/branch-hop/issues/12"));
+  assert.ok(!isSharedIssueUrl("https://github.com/davidoliversteinberg/branch-hop-shared/issues/12"));
+  assert.ok(!isSharedIssueUrl(`${SHARED_REPO_URL}/issues/7?x=1`));
 });
 
 test("new shares notify once, never on the first run, never for my own shares", () => {

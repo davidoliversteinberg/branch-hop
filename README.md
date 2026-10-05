@@ -68,15 +68,15 @@ Chrome may remind you now and then that developer-mode extensions are on. That's
 
 You stay signed in. Branch Hop renews its access in the background, and you'd only sign in again if you sign out, revoke the app on GitHub, or don't use it for six months.
 
-## Shared spaces
+## Sharing is public
 
-Shared branches live in a private GitHub repo named `branch-hop-shared`. Branch Hop finds every one it can reach after you sign in, and shows them together.
+Shared branches are issues in this repo, [davidoliversteinberg/branch-hop](https://github.com/davidoliversteinberg/branch-hop/issues). There's nothing to join: anyone who signs in with GitHub can see what's shared and share their own.
 
-**Joining:** the main space is `davidoliversteinberg/branch-hop-shared`. If you're not in it, Branch Hop's Shared tab shows **Request access**. That opens a short form on this repo; the maintainer replies `/approve`, GitHub emails you an invite, and you click **Accept invite**. How it works, and the one-time setup, are in [docs/access.md](docs/access.md).
+Because the repo is public, **anyone on the internet can read every share: the branch name, the page, the note and the comments.** Leave customer names and anything confidential out of notes and comments. The previews themselves stay behind Vercel's login.
 
-**Your own space:** create a private repo named `branch-hop-shared` and install the Branch Hop app on it (see [docs/github-app.md](docs/github-app.md)). People you add as collaborators see it after they sign in. An organization can do the same with one approval from an owner.
-
-When you share, you pick the space. Settings lists each space and whether it's working. If an organization uses single sign-on, Branch Hop shows a **Sign in with SSO** button instead of failing quietly.
+- **Shared with** names people by GitHub username. The issue @mentions them, which is how GitHub notifies them.
+- **Lists** (such as "Opal review") are stored in the issue, so anyone can use them.
+- You can change or stop only your own shares. Someone else can share the same branch with their own note.
 
 ## Branch status
 
@@ -91,12 +91,17 @@ These are GitHub's own page data, not its documented API, so a GitHub change cou
 
 ## Install in Safari
 
-Safari runs the same extension, wrapped in a small Mac app. Building it needs Xcode.
+**Quickest, no Xcode (Safari 26):** run the install command above, then in Safari turn on **Settings › Advanced › Show features for web developers**, and in **Settings › Developer** click **Add Temporary Extension…** and choose the `Documents/Branch Hop` folder. Allow it on `vercel.app`, `github.com` and `api.github.com`. Safari removes temporary extensions when it quits, so you add it again after a restart. To update, run the install command, then click **Reload** under **Settings › Extensions › Branch Hop**.
 
-1. Install Xcode from the Mac App Store and open it once.
-2. In this repo, run `npm install && npm run safari`. It builds the app, puts it in your Applications folder and opens it once.
-3. In Safari, turn on **Settings › Advanced › Show features for web developers**, then **Developer › Allow unsigned extensions**. Safari resets this when it quits, until Branch Hop is signed through the App Store.
-4. In **Settings › Extensions**, turn on Branch Hop and allow it on `vercel.app`, `github.com` and `api.github.com`.
+**Permanent on your own Mac:** Safari keeps extensions that are signed. Install Xcode from the Mac App Store, open it once, and add your Apple ID under **Xcode › Settings › Accounts** (a free Apple ID works). Copy the 10-character team ID shown there, then in this repo run:
+
+```bash
+npm install && SAFARI_TEAM_ID=ABCDE12345 npm run safari
+```
+
+It builds the Safari app, signs it with your team, puts it in `~/Applications` and opens it once. Turn Branch Hop on in **Safari › Settings › Extensions**. Without `SAFARI_TEAM_ID` the build is unsigned, and Safari only keeps it while **Developer › Allow unsigned extensions** is on, which resets when Safari quits.
+
+**Permanent for everyone:** a Safari app other people can install for good needs signing with a paid Apple Developer account and Apple's notarization. Until then, coworkers on Safari use the temporary install or build their own signed copy.
 
 Safari extensions can't show desktop notifications, so in Safari the count on the toolbar icon is the alert.
 
@@ -117,16 +122,17 @@ Load `dist/` with **Load unpacked**. The popup uses Axiom React 3.1.6, the versi
 
 **Preview URLs.** Vercel serves each branch at `axiom-play-git-<branch>-optimizely-sandbox.vercel.app`, with slashes and other symbols turned into hyphens. A DNS label can only be 63 characters, which leaves 29 for the branch. When a name is longer, Vercel keeps the first 22 characters and adds a 6-character hash: the start of `SHA-256("git-" + branch + "axiom-play")`. Vercel doesn't document this, so the tests check it against real preview URLs.
 
-**Shared branches.** Each shared branch is an open issue in `branch-hop-shared`. The title is the branch, labels starting with `list:` are lists, assignees are the people it's shared with, and comments are the conversation. The issue body starts with a preview link and the note, so it reads well on GitHub, plus a small hidden marker Branch Hop reads back. Edit the note on GitHub and Branch Hop picks it up. Closing the issue stops sharing. While you're signed in, the background worker checks for changes every two minutes and whenever you open the popup.
+**Shared branches.** Each shared branch is an open issue in this repo, titled "Shared branch: <name>". The body starts with a preview link, an @mention line for the people it's shared with, its lists and the note, so it reads well on GitHub, plus a small hidden marker Branch Hop reads back. Lists and people live in that marker rather than in labels and assignees, because only collaborators can set those on a public repo. Comments are the conversation. Edit the note on GitHub and Branch Hop picks it up. Closing the issue stops sharing. While you're signed in, the background worker checks for changes every two minutes and whenever you open the popup.
 
 ## Security and privacy
 
-- **GitHub access is narrow.** The Branch Hop GitHub App can read and write issues in `branch-hop-shared`, and nothing else. It can't read code, can't see `episerver` repos, and can't act anywhere it isn't installed.
+- **Shares are public.** See [Sharing is public](#sharing-is-public). Nothing private is ever written to GitHub without you pressing Share or Comment.
+- **GitHub access is narrow.** The Branch Hop GitHub App can read and write issues in this repo, and nothing else, and the extension only ever calls your profile and this repo's issues. It can't read code, can't see `episerver` repos, and can't act anywhere it isn't installed.
 - **No passwords or secrets.** Sign-in uses GitHub's device flow, and the app has no client secret or private key.
 - **Tokens stay in the background worker.** The 8-hour access token lives in session storage. The refresh token lives in the extension's own IndexedDB, which page scripts can't reach. Neither is synced, logged or put in a URL. **Sign out** deletes both; you can also revoke the app under GitHub **Settings › Applications**.
 - **Exact page matching.** The page script runs only on `axiom-play-git-*-optimizely-sandbox.vercel.app`. Browser match patterns can't be that narrow, so the manifest asks for `*.vercel.app` and the code checks the exact host before doing anything.
 - **github.com access.** Sign-in and sharing call GitHub without your github.com cookies, and Branch Hop never runs scripts on github.com pages. The one exception is **Branch status**, which is off until you turn it on: it reads axiom-play's branch and pull request search pages with your browser's github.com sign-in, read-only, from a fixed allowlist of two pages.
-- **Only safe links open.** Branch Hop only opens preview URLs it builds itself, and issue links in `branch-hop-shared`. Anything a teammate puts in an issue is checked against the same rules.
+- **Only safe links open.** Branch Hop only opens preview URLs it builds itself, and issue links in this repo. Anything a teammate puts in an issue is checked against the same rules.
 - **Untrusted text stays text.** Branch names, notes and comments are shown as plain text, never as HTML. Everything read back from storage or GitHub is validated.
 - **No analytics or remote code.** Pins, bookmarks and settings sync through your browser profile; history, branch status and shared-branch data stay on this computer.
 - **Permissions:** `storage`, `alarms` (background checks), `notifications`, and access to `*.vercel.app`, `github.com` and `api.github.com`.
