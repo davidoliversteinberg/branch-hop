@@ -1,8 +1,8 @@
 # GitHub sign-in setup
 
-Shared lists, comments and notifications use a GitHub App owned by the Branch Hop maintainer. A shared space is any repo named `branch-hop-shared` that the app is installed on: a personal one needs no approval, and an organization's needs one approval from an org owner.
+Sharing, comments and notifications use a GitHub App owned by the Branch Hop maintainer. Shares are issues in the public `davidoliversteinberg/branch-hop` repo, so the app only needs to be installed there.
 
-Each shared branch is stored as an issue in that repo. The title is the branch, labels are lists, assignees are the people it's shared with, and comments are the conversation. GitHub's own notifications work on top of that.
+Each shared branch is an issue in that repo. Lists and people are stored in the issue body, and people are @mentioned so GitHub notifies them. Comments are the conversation.
 
 ## 1. Register the app (the maintainer does this once)
 
@@ -24,35 +24,22 @@ Open <https://github.com/settings/apps/new> and fill in the form.
 
 Click **Create GitHub App**. Don't generate a client secret or a private key. Device sign-in doesn't use them, so there's no secret to look after.
 
-## 2. Install it on the shared repo
+## 2. Install it on the repo
 
-On the app's page, open **Install App**, click **Install**, choose **Only select repositories**, pick `branch-hop-shared`, and click **Install**.
+Open **GitHub › Settings › Applications › Installed GitHub Apps › Branch Hop › Configure**. Under **Repository access**, choose **Only select repositories**, add `branch-hop`, and save. (On a first install: the app's page › **Install App** › **Install**.)
+
+Installing is what lets people's sign-ins write issues there. Reading works without it, because the repo is public.
 
 ## 3. Point Branch Hop at the app
 
-The app's Client ID (it starts with `Iv`) is public. It's set as `GITHUB.clientId` in `src/shared/github.ts`, along with the shared repo's owner and name. This is already done for the current app.
-
-## Set up a team space in an organization
-
-1. Create an **internal** repo named `branch-hop-shared` in the organization. Internal means every member can see it, so nobody needs inviting. (Done for `episerver`.)
-2. Open the app's public install page, `https://github.com/apps/branch-hop/installations/new`, choose the organization, pick **Only select repositories** › `branch-hop-shared`, and submit. If you aren't an owner, GitHub sends the owners a request instead.
-3. Once an owner approves, everyone in the organization sees the team space in Branch Hop after signing in.
-
-## Adding teammates to a personal space
-
-Invite each person as a collaborator on two repos:
-
-- `branch-hop`, so they can download releases
-- `branch-hop-shared`, so they can see and share branches
-
-They install the extension, click **Sign in with GitHub**, and approve the code GitHub shows them. Nobody has to approve anything else.
+The app's Client ID (it starts with `Iv`) is public. It's set as `GITHUB.clientId` in `src/shared/github.ts`, along with the repo shares go to (`SPACE_OWNER`, `SHARED_REPO_NAME`). A fork that wants its own sharing changes those three values and installs its own app.
 
 ## What the app can and can't do
 
-- It can read and write issues, labels and comments in `branch-hop-shared`, and only there.
+- It can read and write issues and comments in `branch-hop`, and only there.
 - It can't read code, can't see `episerver` repos, and can't act anywhere it isn't installed.
 - Sign-in tokens last 8 hours and renew themselves. A refresh token lasts up to 6 months and is replaced each time it's used. Signing out deletes both from the browser, and anyone can revoke the app under GitHub **Settings › Applications**.
 
-## Later: Axiom Play data (v0.3)
+## Merged branches
 
-Build status, PR titles, the full branch list, and "this branch was updated" notifications need read access to `episerver/axiom-play`. That will be a second app with read-only permissions, and an `episerver` org owner installs it once. Keeping it separate means the org never grants write access to anything.
+Branch status (merged and deleted branches) doesn't use this app. `episerver/axiom-play` is internal and the app isn't installed there, so Branch Hop reads it with your browser's own github.com sign-in instead. See "Branch status" in the README.

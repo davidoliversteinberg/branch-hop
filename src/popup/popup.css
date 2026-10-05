@@ -16,3 +16,14 @@ body {
   font-family: var(--ax-fontFamily-sans);
   letter-spacing: 0.015em;
 }
+
+/* A row's pin and menu show on the row you point at or have highlighted. A pinned branch keeps its pin. */
+.bh-row .bh-row-actions {
+  visibility: hidden;
+}
+.bh-row:hover .bh-row-actions,
+.bh-row[data-highlighted] .bh-row-actions,
+.bh-row .bh-row-actions[data-open],
+.bh-row .bh-pin[data-pinned] {
+  visibility: visible;
+}

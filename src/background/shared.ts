@@ -1,12 +1,10 @@
 import {
-  SHARED_REPO_NAME,
+  SPACE_OWNER,
   branchTitle,
   dedupeShared,
   isSharedIssueUrl,
   issueBody,
   issueId,
-  listFromLabel,
-  listLabel,
   newComments,
   newShares,
   parseComment,
@@ -20,7 +18,7 @@ import {
 } from "../shared/github.ts";
 import { EMPTY_SHARED, cleanPerson, cleanSharedState, cleanUnread, type SharedState, type SharedStatus, type Space, type Unread } from "../shared/messages.ts";
 import { previewUrl } from "../shared/preview.ts";
-import { getFavorites, getMuted, getSettings } from "../shared/store.ts";
+import { getFavorites, getMuted, getPins, getSettings } from "../shared/store.ts";
 import { gh, ghAll, GhError, repoPath } from "./gh.ts";
 
 const local = chrome.storage.local;
@@ -46,26 +44,6 @@ function statusOf(err: unknown): { status: SharedStatus; message: string; ssoUrl
   return { status, message: e.message, ssoUrl: e.ssoUrl };
 }
 
-/* Finding spaces: every branch-hop-shared repo the app is installed on */
-async function discover(): Promise<{ spaces: Pick<Space, "owner" | "org">[]; installedOn: string[] }> {
-  const installs = await ghAll("/user/installations", 3, "installations");
-  const spaces: Pick<Space, "owner" | "org">[] = [];
-  const installedOn: string[] = [];
-  for (const raw of installs) {
-    const inst = asObj(raw);
-    const account = asObj(inst.account);
-    const owner = parsePerson(account)?.login;
-    if (!owner || typeof inst.id !== "number") continue;
-    installedOn.push(owner);
-    const repos = await ghAll(`/user/installations/${inst.id}/repositories`, 10, "repositories").catch(() => []);
-    const hasSpace = repos.some((r) => asObj(r).name === SHARED_REPO_NAME && asObj(asObj(r).owner).login === owner);
-    if (hasSpace) spaces.push({ owner, org: account.type === "Organization" });
-  }
-  // Organizations first, so the team space comes before a personal one.
-  spaces.sort((a, b) => Number(b.org) - Number(a.org) || a.owner.localeCompare(b.owner));
-  return { spaces, installedOn };
-}
-
 /* Syncing */
 let syncing: Promise<SharedState> | null = null;
 
@@ -77,33 +55,30 @@ export function sync(): Promise<SharedState> {
   return syncing;
 }
 
-async function syncSpace(owner: string, org: boolean): Promise<{ space: Space; items: SharedBranch[] }> {
+/** Lists get a steady colour from their name. */
+const listColor = (name: string) => LIST_COLORS[[...name].reduce((x, c) => (x * 31 + c.charCodeAt(0)) >>> 0, 0) % LIST_COLORS.length];
+
+async function syncSpace(owner: string): Promise<{ space: Space; items: SharedBranch[] }> {
   try {
-    const [issues, people, labels] = await Promise.all([ghAll(repoPath(owner, "/issues?state=open")), ghAll(repoPath(owner, "/assignees"), 3), ghAll(repoPath(owner, "/labels"), 3)]);
-    const lists: SharedList[] = labels.flatMap((l) => {
-      const label = asObj(l);
-      const name = listFromLabel(label.name);
-      return name ? [{ name, color: typeof label.color === "string" && /^[0-9a-fA-F]{6}$/.test(label.color) ? label.color : "717863" }] : [];
-    });
-    return {
-      space: { owner, org, status: "ok", people: people.map(parsePerson).filter(nonNull), lists },
-      items: issues.map((i) => parseIssue(i, owner)).filter(nonNull),
-    };
+    const items = (await ghAll(repoPath(owner, "/issues?state=open"))).map((i) => parseIssue(i, owner)).filter(nonNull);
+    // On a public repo there's no member list, so people and lists come from the shares themselves.
+    const logins = [...new Set(items.flatMap((i) => [i.sharedBy, ...i.sharedWith]))];
+    const lists: SharedList[] = [...new Set(items.flatMap((i) => i.lists))].sort((a, b) => a.localeCompare(b)).map((name) => ({ name, color: listColor(name) }));
+    return { space: { owner, org: false, status: "ok", people: logins.slice(0, 100).map((login) => ({ login })), lists }, items };
   } catch (err) {
-    return { space: { owner, org, ...statusOf(err), people: [], lists: [] }, items: [] };
+    return { space: { owner, org: false, ...statusOf(err), people: [], lists: [] }, items: [] };
   }
 }
 
 async function runSync(): Promise<SharedState> {
   const prev = await readShared();
   try {
-    const { spaces: found, installedOn } = await discover();
-    const results = await Promise.all(found.map((s) => syncSpace(s.owner, s.org)));
+    const results = [await syncSpace(SPACE_OWNER)];
     const spaces = results.map((r) => r.space);
     // Keep what we last saw for a space that failed this time, so nothing vanishes while offline.
     const items = dedupeShared(results.flatMap((r) => (r.space.status === "ok" ? r.items : prev.items.filter((i) => i.space === r.space.owner))));
-    const status: SharedStatus = !spaces.length ? "no-space" : spaces.some((s) => s.status === "ok") ? "ok" : spaces[0].status;
-    const state: SharedState = { status, items, spaces, installedOn, fetchedAt: Date.now() };
+    const status: SharedStatus = spaces.some((s) => s.status === "ok") ? "ok" : spaces[0].status;
+    const state: SharedState = { status, items, spaces, installedOn: [], fetchedAt: Date.now() };
     await local.set({ [K.shared]: state });
     const login = await me();
     if (login) for (const r of results) if (r.space.status === "ok") await detectEvents(r.space.owner, r.items, login).catch(() => undefined);
@@ -122,31 +97,24 @@ async function requireSpace(owner: string): Promise<SharedState> {
 }
 
 /* Sharing */
-async function ensureList(owner: string, name: string, known: SharedList[]): Promise<void> {
-  if (known.some((l) => l.name.toLowerCase() === name.toLowerCase())) return;
-  const color = LIST_COLORS[[...name].reduce((x, c) => (x * 31 + c.charCodeAt(0)) >>> 0, 0) % LIST_COLORS.length];
-  try {
-    await gh(repoPath(owner, "/labels"), { method: "POST", body: { name: listLabel(name), color, description: "A Branch Hop list" } });
-  } catch (err) {
-    if (!(err instanceof GhError && err.code === "invalid")) throw err; // 422: the label already exists
-  }
-}
-
 export async function share(req: { space: string; key: string; name?: string; route: string; note?: string; lists: string[]; people: string[] }): Promise<SharedBranch> {
   const state = await requireSpace(req.space);
-  const space = state.spaces.find((s) => s.owner === req.space);
-  for (const list of req.lists) await ensureList(req.space, list, space?.lists ?? []);
-  const title = req.name ?? req.key;
-  const body = issueBody({ key: req.key, name: req.name, route: req.route, note: req.note });
-  const existing = state.items.find((i) => i.space === req.space && i.key === req.key);
+  const login = await me();
+  const title = `Shared branch: ${req.name ?? req.key}`;
+  // Only the person who shared a branch can change that share. Anyone else adds their own.
+  const existing = state.items.find((i) => i.space === req.space && i.key === req.key && i.sharedBy === login);
+  const people = [...new Set([...(existing?.sharedWith ?? []), ...req.people])].filter((p) => p !== login);
+  const body = issueBody({ key: req.key, name: req.name, route: req.route, note: req.note, lists: req.lists, people });
   let raw: unknown;
-  if (existing) {
-    raw = await gh(repoPath(req.space, `/issues/${existing.number}`), { method: "PATCH", body: { title, body } });
-    // Adding labels and assignees this way keeps any that are already there.
-    if (req.lists.length) await gh(repoPath(req.space, `/issues/${existing.number}/labels`), { method: "POST", body: { labels: req.lists.map(listLabel) } });
-    if (req.people.length) raw = await gh(repoPath(req.space, `/issues/${existing.number}/assignees`), { method: "POST", body: { assignees: req.people } });
-  } else {
-    raw = await gh(repoPath(req.space, "/issues"), { method: "POST", body: { title, body, labels: req.lists.map(listLabel), assignees: req.people } });
+  try {
+    raw = existing
+      ? await gh(repoPath(req.space, `/issues/${existing.number}`), { method: "PATCH", body: { title, body } })
+      : await gh(repoPath(req.space, "/issues"), { method: "POST", body: { title, body } });
+  } catch (err) {
+    if (err instanceof GhError && err.code === "no-permission") {
+      throw new GhError(403, `Branch Hop's GitHub App isn't installed on ${SPACE_OWNER}/branch-hop yet, so it can't share there.`, "no-permission");
+    }
+    throw err;
   }
   const shared = parseIssue(raw, req.space);
   if (!shared) throw new GhError(0, "GitHub saved the share, but Branch Hop couldn't read it back. Refresh to see it.");
@@ -237,10 +205,11 @@ async function assignedBy(space: string, issue: number, login: string): Promise<
 }
 
 async function detectEvents(space: string, items: SharedBranch[], login: string): Promise<void> {
-  const [settings, snapshots, favorites, muted, participated, notifiedRaw] = await Promise.all([
+  const [settings, snapshots, favorites, pins, muted, participated, notifiedRaw] = await Promise.all([
     getSettings(),
     getSnapshots(),
     getFavorites(),
+    getPins(),
     getMuted(),
     participatedSet(),
     local.get(K.notified),
@@ -264,7 +233,8 @@ async function detectEvents(space: string, items: SharedBranch[], login: string)
       .filter((c) => c.space === space);
     for (const c of comments) if (c.author === login) participated.add(issueId(space, c.issue));
     if (settings.notifyComments) {
-      const favoriteKeys = new Set(favorites.map((f) => f.key));
+      // Following: bookmarked and pinned branches count, as favorites did before 0.4.
+      const favoriteKeys = new Set([...favorites.map((f) => f.key), ...pins.map((p) => p.key)]);
       const mutedKeys = new Set(muted);
       const follows = (i: SharedBranch) =>
         !mutedKeys.has(i.key) && (i.sharedWith.includes(login) || i.sharedBy === login || participated.has(issueId(space, i.number)) || favoriteKeys.has(i.key));

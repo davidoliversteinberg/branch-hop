@@ -5,7 +5,8 @@ import { clearTabState, getNames, getTabState, recordVisit, setTabState } from "
 import { POLL_ALARM, cancelSignIn, getStatus, isSignedIn, pollOnce, signOut, startSignIn, whenSignedIn } from "./auth.ts";
 import { GhError } from "./gh.ts";
 import { SYNC_ALARM, addComment, listComments, markRead, onNoticeClick, share, sync, unshare, updateBadge } from "./shared.ts";
-import { UPDATE_ALARM, checkForUpdate, reloadIfFolderUpdated } from "./updates.ts";
+import { STATUS_ALARM, refreshStatuses } from "./status.ts";
+import { UPDATE_ALARM, UPDATE_NOTICE, checkForUpdate, onUpdateNoticeClick, reloadIfFolderUpdated } from "./updates.ts";
 
 const FOLDER_ALARM = "folder-check";
 
@@ -49,6 +50,7 @@ async function resume(): Promise<void> {
   if (await reloadIfFolderUpdated()) return;
   await chrome.alarms.create(UPDATE_ALARM, { periodInMinutes: 360 });
   await chrome.alarms.create(FOLDER_ALARM, { periodInMinutes: 1 });
+  await chrome.alarms.create(STATUS_ALARM, { periodInMinutes: 30 });
   if (await isSignedIn()) await startSyncing();
   await checkForUpdate();
   await updateBadge();
@@ -61,9 +63,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SYNC_ALARM) void sync();
   if (alarm.name === UPDATE_ALARM) void checkForUpdate();
   if (alarm.name === FOLDER_ALARM) void reloadIfFolderUpdated();
+  if (alarm.name === STATUS_ALARM) void refreshStatuses();
 });
 
-chrome.notifications?.onClicked.addListener((id) => void onNoticeClick(id));
+chrome.notifications?.onClicked.addListener((id) => void (id === UPDATE_NOTICE ? onUpdateNoticeClick() : onNoticeClick(id)));
 chrome.notifications?.onButtonClicked.addListener((id, button) => void onNoticeClick(id, button));
 
 async function endSession(message?: string): Promise<void> {
@@ -87,6 +90,8 @@ async function handle(req: Request): Promise<unknown> {
       return sync();
     case "check-update":
       return (await reloadIfFolderUpdated()) ? null : checkForUpdate();
+    case "status-refresh":
+      return refreshStatuses(req.force);
     case "share":
       return share(req);
     case "unshare":

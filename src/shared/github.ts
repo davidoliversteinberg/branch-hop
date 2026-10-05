@@ -8,15 +8,19 @@ export const GITHUB = {
 } as const;
 
 /**
- * A shared space is a repo with exactly this name, under a person or an organization
- * (for example episerver/branch-hop-shared). Branch Hop never touches any other repo.
+ * Shared branches are issues in Branch Hop's own public repo. Anyone signed in to GitHub can read
+ * them and add one, with no invite. Because the repo is public, so is everything shared there.
+ * Branch Hop never touches any other repo.
  */
-export const SHARED_REPO_NAME = "branch-hop-shared";
-/** Shown in help text when nobody has set up a space yet. */
-export const PERSONAL_SPACE_EXAMPLE = "davidoliversteinberg";
+export const SPACE_OWNER = "davidoliversteinberg";
+export const SHARED_REPO_NAME = "branch-hop";
+export const SPACE_URL = `${GITHUB.web}/${SPACE_OWNER}/${SHARED_REPO_NAME}`;
 
 export const GITHUB_ORIGINS = ["https://github.com/*", "https://api.github.com/*"];
 export const spaceUrl = (owner: string) => `${GITHUB.web}/${owner}/${SHARED_REPO_NAME}`;
+/** People named on a share, at most. */
+export const SHARE_PEOPLE_MAX = 10;
+export const SHARE_LISTS_MAX = 5;
 
 export const LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 export const LIST_PREFIX = "list:";
@@ -65,24 +69,39 @@ export function listFromLabel(label: unknown): string | null {
 }
 
 const MARKER_RE = /<!--\s*branch-hop\s+(\{[\s\S]*?\})\s*-->/;
-const PREVIEW_LINE_RE = /^\*\*Preview:\*\*\s/;
+// Lines Branch Hop writes for people reading on GitHub; they aren't part of the note.
+const GENERATED_LINE_RE = /^\*\*(Preview|For|Lists?):\*\*\s/;
+
+export type ShareBody = { key: string; name?: string; route: string; note?: string; lists?: string[]; people?: string[] };
+
+const cleanLogins = (v: unknown): string[] => (Array.isArray(v) ? [...new Set(v.map(login).filter((l): l is string => l !== null))].slice(0, SHARE_PEOPLE_MAX) : []);
+const cleanLists = (v: unknown): string[] =>
+  Array.isArray(v) ? [...new Set(v.map((l) => (typeof l === "string" ? cleanListName(l) : null)).filter((l): l is string => l !== null))].slice(0, SHARE_LISTS_MAX) : [];
 
 /**
- * Issue body for a shared branch: a readable preview link and note for people on GitHub,
- * plus a small JSON marker the extension reads back. Edit the note on GitHub and it updates here too.
+ * Issue body for a shared branch: a readable preview link, who it's for and the note for people on
+ * GitHub, plus a small JSON marker the extension reads back. Lists and people live in the marker,
+ * not in labels and assignees, because only collaborators can set those on a public repo.
+ * The "For:" line @mentions people, which is how GitHub notifies them.
  */
-export function issueBody(branch: { key: string; name?: string; route: string; note?: string }): string {
-  const data: Record<string, unknown> = { v: 1, key: branch.key, route: branch.route };
+export function issueBody(branch: ShareBody): string {
+  const lists = cleanLists(branch.lists);
+  const people = cleanLogins(branch.people);
+  const data: Record<string, unknown> = { v: 2, key: branch.key, route: branch.route };
   if (branch.name) data.name = branch.name;
+  if (lists.length) data.lists = lists;
+  if (people.length) data.with = people;
   // Escaped so a route can never close the HTML comment early.
   const json = JSON.stringify(data).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
   const lines = [`<!-- branch-hop ${json} -->`, `**Preview:** ${previewUrl(branch.key, branch.route)}`];
+  if (people.length) lines.push(`**For:** ${people.map((p) => `@${p}`).join(" ")}`);
+  if (lists.length) lines.push(`**${lists.length === 1 ? "List" : "Lists"}:** ${lists.join(", ")}`);
   const note = branch.note?.trim().slice(0, SHARED_NOTE_MAX);
   if (note) lines.push("", note);
   return lines.join("\n");
 }
 
-export function parseIssueBody(body: unknown): { key: string; name?: string; route: string; note?: string } | null {
+export function parseIssueBody(body: unknown): (ShareBody & { lists: string[]; people: string[] }) | null {
   if (typeof body !== "string" || body.length > 20000) return null;
   const match = MARKER_RE.exec(body);
   if (!match) return null;
@@ -92,16 +111,16 @@ export function parseIssueBody(body: unknown): { key: string; name?: string; rou
   } catch {
     return null;
   }
-  if (!data || data.v !== 1 || typeof data.key !== "string" || !KEY_RE.test(data.key) || !isSafeRoute(data.route)) return null;
+  if (!data || (data.v !== 1 && data.v !== 2) || typeof data.key !== "string" || !KEY_RE.test(data.key) || !isSafeRoute(data.route)) return null;
   const name = typeof data.name === "string" && BRANCH_NAME_RE.test(data.name) ? data.name : undefined;
   const rest = body
     .slice(match.index + match[0].length)
     .replace(/\r\n/g, "\n")
     .split("\n")
-    .filter((line) => !PREVIEW_LINE_RE.test(line.trim()))
+    .filter((line) => !GENERATED_LINE_RE.test(line.trim()))
     .join("\n")
     .trim();
-  return { key: data.key, name, route: data.route, note: rest ? rest.slice(0, SHARED_NOTE_MAX) : undefined };
+  return { key: data.key, name, route: data.route, note: rest ? rest.slice(0, SHARED_NOTE_MAX) : undefined, lists: cleanLists(data.lists), people: cleanLogins(data.with) };
 }
 
 /** Turns a GitHub issue into a shared branch, or null if it isn't one of ours. */
@@ -112,14 +131,16 @@ export function parseIssue(raw: unknown, space: string): SharedBranch | null {
   const parsed = parseIssueBody(o.body);
   const sharedBy = login(obj(o.user)?.login);
   if (!url || !parsed || !sharedBy || !isIso(o.created_at) || !isIso(o.updated_at)) return null;
-  const sharedWith = (Array.isArray(o.assignees) ? o.assignees : []).map((a) => login(obj(a)?.login)).filter((l): l is string => l !== null);
-  const lists = (Array.isArray(o.labels) ? o.labels : []).map((l) => listFromLabel(obj(l)?.name)).filter((l): l is string => l !== null);
+  // Version 1 shares used assignees and labels; both still count.
+  const assignees = (Array.isArray(o.assignees) ? o.assignees : []).map((a) => login(obj(a)?.login)).filter((l): l is string => l !== null);
+  const labels = (Array.isArray(o.labels) ? o.labels : []).map((l) => listFromLabel(obj(l)?.name)).filter((l): l is string => l !== null);
+  const { people, lists, ...rest } = parsed;
   return {
     space,
     number: o.number,
-    ...parsed,
-    lists: [...new Set(lists)],
-    sharedWith: [...new Set(sharedWith)].slice(0, 10),
+    ...rest,
+    lists: [...new Set([...lists, ...labels])],
+    sharedWith: [...new Set([...people, ...assignees])].slice(0, SHARE_PEOPLE_MAX),
     sharedBy,
     comments: typeof o.comments === "number" && o.comments >= 0 ? Math.floor(o.comments) : 0,
     createdAt: o.created_at,
@@ -161,11 +182,9 @@ export function parsePerson(raw: unknown): Person | null {
   return { login: l, name, avatarUrl: avatar(o.avatar_url) };
 }
 
-/** Issue links we open must point at a branch-hop-shared repo on github.com. */
+/** Issue links we open must point at an issue in the shared repo on github.com. */
 export function isSharedIssueUrl(url: unknown): url is string {
-  if (typeof url !== "string") return false;
-  const m = /^https:\/\/github\.com\/([A-Za-z0-9-]{1,39})\/branch-hop-shared\/issues\/\d+(#issuecomment-\d+)?$/.exec(url);
-  return !!m && LOGIN_RE.test(m[1]);
+  return typeof url === "string" && url.length < 200 && url.startsWith(`${SPACE_URL}/issues/`) && /^\/issues\/\d+(#issuecomment-\d+)?$/.test(url.slice(SPACE_URL.length));
 }
 
 /** GitHub's single sign-on page for an organization, as sent in the X-GitHub-SSO header. */

@@ -2,30 +2,40 @@ import { issueId, type SharedBranch } from "../shared/github.ts";
 import type { Unread } from "../shared/messages.ts";
 import type { PreviewStatus } from "../shared/nav";
 import { pagePath } from "../shared/preview";
-import { findFavorite, isSamePage, type Favorite, type Visit } from "../shared/store";
+import type { BranchStatus } from "../shared/status.ts";
+import { isBranchOnly, isSamePage, type Favorite } from "../shared/store";
 import type { ExtState } from "./useExtensionState";
 
-export type View = "favorites" | "shared" | "recent";
+export type View = "branches" | "shared";
 export type Lookup = PreviewStatus | "checking";
 export type Typed = { kind: "link"; key: string; route: string } | { kind: "name"; name: string; key: string | null; status: Lookup };
 
+/**
+ * One row. Branch rows open where you left off on that branch; bookmark, shared and pasted rows
+ * open their own page.
+ */
 export type Item = {
   id: string;
+  kind: "branch" | "bookmark" | "shared" | "typed";
   key: string | null;
   name?: string;
   title: string;
-  subtitle: string;
-  route?: string;
-  /** Always open this route (favorite pages, pasted links and shared branches), even with "keep route" on. */
-  exactRoute?: string;
-  /** The saved favorite for this row's page, if there is one. */
-  favorite?: Favorite;
+  subtitle?: string;
+  /** The page this row opens. */
+  route: string;
+  bookmark?: Favorite;
+  pinned: boolean;
+  /** The branch (or, for a bookmark, the page) this tab is showing. */
   current: boolean;
+  /** The branch the flip-back shortcut goes to. */
   previous: boolean;
+  /** A bookmark listed under its branch. */
+  nested?: boolean;
   time?: string;
-  status?: Lookup;
+  lookup?: Lookup;
   shared?: SharedBranch;
   unread?: boolean;
+  status?: BranchStatus;
 };
 export type ItemGroup = { id: string; label: string; items: Item[] };
 
@@ -49,91 +59,136 @@ export const LOOKUP_TEXT: Record<Lookup, string> = {
   error: "Couldn't reach Vercel to check",
 };
 
+const RECENT_BRANCHES = 20;
+
 export type Sources = { ext: ExtState; shared: SharedBranch[]; me: string | null; seen: Unread };
 
 export function buildGroups({ ext, shared, me, seen }: Sources, view: View, query: string, typed: Typed | null): ItemGroup[] {
   const here = ext.active?.loc ?? null;
   const sharedByKey = new Map(shared.map((s) => [s.key, s]));
-  const nameOf = (key: string) => ext.favorites.find((f) => f.key === key && f.name)?.name ?? ext.names[key] ?? sharedByKey.get(key)?.name;
-  const favOf = (key: string, route: string) => findFavorite(ext.favorites, key, route);
-  const base = (key: string, route: string) => ({
-    key,
-    name: nameOf(key),
-    title: nameOf(key) ?? key,
-    favorite: favOf(key, route),
-    current: key === here?.key,
-    previous: key === ext.prevKey,
-  });
+  const nameOf = (key: string) =>
+    ext.names[key] ?? ext.pins.find((p) => p.key === key && p.name)?.name ?? ext.favorites.find((f) => f.key === key && f.name)?.name ?? sharedByKey.get(key)?.name;
+  const titleOf = (key: string) => nameOf(key) ?? key;
+  // Recent is newest first, so the first visit on a branch is where you left off.
+  const lastVisit = (key: string) => ext.recent.find((v) => v.key === key);
+  const bookmarks = ext.favorites.filter((f) => !isBranchOnly(f));
+  const pinnedKeys = new Set([...ext.pins.map((p) => p.key), ...ext.favorites.map((f) => f.key)]);
 
-  // A favorite is a page: its note (or the branch) on top, the page underneath. It always opens that page.
-  const visitedHere = (f: Favorite) => ext.recent.find((v) => isSamePage(f, v.key, v.route))?.at;
-  const fromFavorite = (f: Favorite): Item => {
-    const branch = nameOf(f.key) ?? f.key;
-    const seen = visitedHere(f);
+  const branchRow = (key: string): Item => {
+    const visit = lastVisit(key);
+    const route = visit?.route ?? "/";
     return {
-      ...base(f.key, f.route),
-      id: `fav-${f.id}`,
-      title: f.note ?? branch,
-      subtitle: f.note ? `${branch} · ${routePath(f.route)}` : routePath(f.route),
-      route: f.route,
-      exactRoute: f.route,
-      current: !!here && isSamePage(f, here.key, here.route),
-      time: seen ? ago(seen) : undefined,
+      id: `branch-${key}`,
+      kind: "branch",
+      key,
+      name: nameOf(key),
+      title: titleOf(key),
+      subtitle: visit ? routePath(route) : "Start page",
+      route,
+      pinned: pinnedKeys.has(key),
+      current: key === here?.key,
+      previous: key === ext.prevKey,
+      time: visit ? ago(visit.at) : undefined,
+      status: ext.statuses[key],
     };
   };
-  const fromVisit = (v: Visit): Item => ({
-    ...base(v.key, v.route),
-    id: `recent-${v.key}-${routePath(v.route)}`,
-    subtitle: favOf(v.key, v.route)?.note ?? routePath(v.route),
-    route: v.route,
-    current: !!here && isSamePage(v, here.key, here.route),
-    time: ago(v.at),
+  const bookmarkRow = (f: Favorite, nested: boolean): Item => ({
+    id: `bookmark-${f.id}`,
+    kind: "bookmark",
+    key: f.key,
+    name: nameOf(f.key),
+    title: f.note ?? routePath(f.route),
+    subtitle: nested ? (f.note ? routePath(f.route) : undefined) : f.note ? `${titleOf(f.key)} · ${routePath(f.route)}` : titleOf(f.key),
+    route: f.route,
+    bookmark: f,
+    pinned: true,
+    current: !!here && isSamePage(f, here.key, here.route),
+    previous: false,
+    nested,
   });
-  const fromShared = (s: SharedBranch): Item => ({
-    ...base(s.key, s.route),
+  const sharedRow = (s: SharedBranch): Item => ({
     id: `shared-${s.space}-${s.number}`,
+    kind: "shared",
+    key: s.key,
+    name: nameOf(s.key),
+    title: titleOf(s.key),
     subtitle: s.note ?? `Shared by @${s.sharedBy}`,
-    exactRoute: s.route,
+    route: s.route,
+    pinned: pinnedKeys.has(s.key),
+    current: !!here && isSamePage(s, here.key, here.route),
+    previous: false,
     time: ago(Date.parse(s.updatedAt)),
     shared: s,
     unread: !!seen[issueId(s.space, s.number)],
+    status: ext.statuses[s.key],
   });
 
-  const lastSeen = (f: Favorite) => visitedHere(f) ?? f.addedAt;
-  const favorites = [...ext.favorites].sort((a, b) => lastSeen(b) - lastSeen(a)).map(fromFavorite);
-  // Every page you've opened except the one you're on. The flip-back hint goes on the newest row of the last branch.
-  const recent = ext.recent.filter((v) => !(here && isSamePage(v, here.key, here.route))).map(fromVisit);
-  const flipRow = recent.find((i) => i.previous);
-  for (const i of recent) i.previous = i === flipRow;
+  // Pinned branches by latest activity, each followed by its bookmarks.
+  const activity = (key: string) =>
+    Math.max(lastVisit(key)?.at ?? 0, ext.pins.find((p) => p.key === key)?.addedAt ?? 0, ...ext.favorites.filter((f) => f.key === key).map((f) => f.addedAt));
+  const pinnedOrder = [...pinnedKeys].sort((a, b) => activity(b) - activity(a));
+  const bookmarksOf = (key: string) => bookmarks.filter((f) => f.key === key).sort((a, b) => a.addedAt - b.addedAt);
+  // Your other branches, newest first. The one in this tab is already at the top of the popup.
+  const recentKeys = [...new Set(ext.recent.map((v) => v.key))].filter((k) => !pinnedKeys.has(k) && k !== here?.key).slice(0, RECENT_BRANCHES);
 
   const q = query.trim().toLowerCase();
   if (!q) {
-    if (view === "favorites") return favorites.length ? [{ id: "favorites", label: "Favorites", items: favorites }] : [];
-    if (view === "recent") return recent.length ? [{ id: "recent", label: "Recently opened", items: recent }] : [];
-    return sharedGroups(shared, me, fromShared);
+    if (view === "shared") return sharedGroups(shared, me, sharedRow);
+    const pinned = pinnedOrder.flatMap((k) => [branchRow(k), ...bookmarksOf(k).map((f) => bookmarkRow(f, true))]);
+    return [
+      { id: "pinned", label: "Pinned", items: pinned },
+      { id: "recent", label: "Recent", items: recentKeys.map(branchRow) },
+    ].filter((g) => g.items.length);
   }
 
   const tokens = q.split(/\s+/);
-  const matches = (item: Item) => {
-    const hay = [item.title, item.key ?? "", item.subtitle, item.shared?.sharedBy ?? "", ...(item.shared?.lists ?? [])].join(" ").toLowerCase();
+  const matches = (...parts: (string | undefined)[]) => {
+    const hay = parts.join(" ").toLowerCase();
     return tokens.every((t) => hay.includes(t));
   };
-  // Each page shows once: a shared or recent row is hidden when that same page is already a favorite.
-  const pageOf = (i: Item) => `${i.key}|${routePath(i.exactRoute ?? i.route ?? "/")}`;
-  const groups: ItemGroup[] = [{ id: "favorites", label: "Favorites", items: favorites.filter(matches) }];
-  const listed = new Set(groups[0].items.map(pageOf));
-  const sharedMatches = shared.map(fromShared).filter((i) => !listed.has(pageOf(i)) && matches(i));
-  groups.push({ id: "shared", label: "Shared", items: sharedMatches });
-  for (const i of sharedMatches) listed.add(pageOf(i));
-  groups.push({ id: "recent", label: "Recent", items: recent.filter((i) => !listed.has(pageOf(i)) && matches(i)) });
-  for (const i of groups[2].items) listed.add(pageOf(i));
+  const branchMatches = (key: string) => matches(titleOf(key), key, lastVisit(key)?.route);
+  const pinned = pinnedOrder.flatMap((k) => {
+    const all = branchMatches(k);
+    const marks = bookmarksOf(k).filter((f) => all || matches(f.note, f.route, titleOf(k)));
+    return all || marks.length ? [branchRow(k), ...marks.map((f) => bookmarkRow(f, true))] : [];
+  });
+  const shownPages = new Set(bookmarks.map((f) => `${f.key}|${routePath(f.route)}`));
+  const sharedMatches = shared
+    .filter((s) => !shownPages.has(`${s.key}|${routePath(s.route)}`) && matches(titleOf(s.key), s.key, s.note, s.sharedBy, ...s.lists))
+    .map(sharedRow);
+  const groups: ItemGroup[] = [
+    { id: "pinned", label: "Pinned", items: pinned },
+    { id: "shared", label: "Shared", items: sharedMatches },
+    { id: "recent", label: "Recent", items: recentKeys.filter(branchMatches).map(branchRow) },
+  ];
   const listedKeys = new Set(groups.flatMap((g) => g.items.map((i) => i.key)));
 
-  if (typed?.kind === "link" && !listed.has(`${typed.key}|${routePath(typed.route)}`)) {
-    groups.push({ id: "any", label: "Pasted link", items: [{ ...base(typed.key, typed.route), id: "typed-link", subtitle: routePath(typed.route), exactRoute: typed.route }] });
+  if (typed?.kind === "link" && !shownPages.has(`${typed.key}|${routePath(typed.route)}`)) {
+    groups.push({
+      id: "any",
+      label: "Pasted link",
+      items: [{ ...branchRow(typed.key), id: "typed-link", kind: "typed", subtitle: routePath(typed.route), route: typed.route, time: undefined }],
+    });
   } else if (typed?.kind === "name" && !(typed.key && listedKeys.has(typed.key))) {
-    const known = typed.key ? { ...base(typed.key, "/"), favorite: undefined } : { key: null, current: false, previous: false };
-    groups.push({ id: "any", label: "Any branch", items: [{ ...known, id: "typed-name", name: typed.name, title: typed.name, subtitle: LOOKUP_TEXT[typed.status], status: typed.status }] });
+    groups.push({
+      id: "any",
+      label: "Any branch",
+      items: [
+        {
+          id: "typed-name",
+          kind: "typed",
+          key: typed.key,
+          name: typed.name,
+          title: typed.name,
+          subtitle: LOOKUP_TEXT[typed.status],
+          route: "/",
+          pinned: false,
+          current: false,
+          previous: false,
+          lookup: typed.status,
+        },
+      ],
+    });
   }
   return groups.filter((g) => g.items.length);
 }
@@ -146,7 +201,9 @@ function sharedGroups(shared: SharedBranch[], me: string | null, toItem: (s: Sha
   const multi = new Set(shared.map((s) => s.space)).size > 1;
   const groups: ItemGroup[] = [{ id: "with-you", label: "Shared with you", items: take(shared.filter((s) => !!me && s.sharedWith.includes(me) && s.sharedBy !== me)) }];
   // Lists belong to a space; with more than one space, the label says which.
-  const lists = [...new Map(shared.flatMap((s) => s.lists.map((name) => [`${s.space}/${name}`, { space: s.space, name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
+  const lists = [...new Map(shared.flatMap((s) => s.lists.map((name) => [`${s.space}/${name}`, { space: s.space, name }] as const))).values()].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
   for (const l of lists) {
     groups.push({ id: `list-${l.space}-${l.name}`, label: multi ? `${l.name} · ${l.space}` : l.name, items: take(shared.filter((s) => s.space === l.space && s.lists.includes(l.name))) });
   }

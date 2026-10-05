@@ -8,6 +8,7 @@ import { updateBadge } from "./shared.ts";
  *    so updating never needs a trip to chrome://extensions.
  */
 export const UPDATE_ALARM = "update-check";
+export const UPDATE_NOTICE = "branch-hop-update";
 const LATEST = "https://api.github.com/repos/davidoliversteinberg/branch-hop/releases/latest";
 const RELEASES = "https://github.com/davidoliversteinberg/branch-hop/releases/";
 const VERSION_RE = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;
@@ -30,10 +31,42 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
   } catch {
     // Offline: try again at the next check.
   }
-  if (info) await chrome.storage.local.set({ update: info });
-  else await chrome.storage.local.remove("update");
+  if (info) {
+    await chrome.storage.local.set({ update: info });
+    await announce(info);
+  } else await chrome.storage.local.remove("update");
   await updateBadge();
   return info;
+}
+
+/** One desktop notification per new version, so nobody has to notice the arrow on the icon. */
+async function announce(info: UpdateInfo): Promise<void> {
+  if (!chrome.notifications?.create) return; // Safari: the arrow on the toolbar icon is the alert
+  const { updateAnnounced } = await chrome.storage.local.get("updateAnnounced");
+  if (updateAnnounced === info.latest) return;
+  await chrome.storage.local.set({ updateAnnounced: info.latest });
+  chrome.notifications.create(UPDATE_NOTICE, {
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+    title: `Branch Hop ${info.latest} is ready`,
+    message: "Click to see what's new and how to update. It takes one Terminal command.",
+  });
+}
+
+/** Opens the popup, where the update notice has the command; falls back to the release page. */
+export async function onUpdateNoticeClick(): Promise<void> {
+  chrome.notifications?.clear(UPDATE_NOTICE);
+  const action = chrome.action as typeof chrome.action & { openPopup?: () => Promise<void> };
+  try {
+    if (typeof action.openPopup === "function") {
+      await action.openPopup();
+      return;
+    }
+  } catch {
+    // No focused browser window; the release page explains the update too.
+  }
+  const info = cleanUpdate((await chrome.storage.local.get("update")).update);
+  await chrome.tabs.create({ url: info?.url ?? `${RELEASES}latest` });
 }
 
 /** Folder installs: if the manifest on disk is newer than the one running, the folder was updated. */

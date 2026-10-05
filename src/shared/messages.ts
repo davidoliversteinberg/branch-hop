@@ -20,6 +20,7 @@ export type Request =
   | { type: "sign-out" }
   | { type: "sync" }
   | { type: "check-update" }
+  | { type: "status-refresh"; force: boolean }
   | { type: "share"; space: string; key: string; name?: string; route: string; note?: string; lists: string[]; people: string[] }
   | { type: "unshare"; space: string; issue: number }
   | { type: "comments"; space: string; issue: number }
@@ -67,6 +68,8 @@ export function cleanRequest(raw: unknown): Request | null {
     case "sync":
     case "check-update":
       return { type: r.type };
+    case "status-refresh":
+      return { type: "status-refresh", force: r.force === true };
     case "share": {
       if (!isLogin(r.space) || typeof r.key !== "string" || !KEY_RE.test(r.key) || !isSafeRoute(r.route)) return null;
       const name = typeof r.name === "string" && BRANCH_NAME_RE.test(r.name) ? r.name : undefined;
