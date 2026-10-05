@@ -93,13 +93,18 @@ These are GitHub's own page data, not its documented API, so a GitHub change cou
 
 **Quickest, no Xcode (Safari 26):** run the install command above, then in Safari turn on **Settings › Advanced › Show features for web developers**, and in **Settings › Developer** click **Add Temporary Extension…** and choose the `Documents/Branch Hop` folder. Allow it on `vercel.app`, `github.com` and `api.github.com`. Safari removes temporary extensions when it quits, so you add it again after a restart. To update, run the install command, then click **Reload** under **Settings › Extensions › Branch Hop**.
 
-**Permanent on your own Mac:** Safari keeps extensions that are signed. Install Xcode from the Mac App Store, open it once, and add your Apple ID under **Xcode › Settings › Accounts** (a free Apple ID works). Copy the 10-character team ID shown there, then in this repo run:
+**Permanent on your own Mac:** Safari keeps extensions that are signed, and a free Apple ID can sign one for your own Mac.
 
-```bash
-npm install && SAFARI_TEAM_ID=ABCDE12345 npm run safari
-```
+1. Install Xcode from the Mac App Store and open it once.
+2. In Xcode, open **Settings › Accounts**, click **+**, choose **Apple ID** and sign in.
+3. In Terminal, run:
 
-It builds the Safari app, signs it with your team, puts it in `~/Applications` and opens it once. Turn Branch Hop on in **Safari › Settings › Extensions**. Without `SAFARI_TEAM_ID` the build is unsigned, and Safari only keeps it while **Developer › Allow unsigned extensions** is on, which resets when Safari quits.
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/davidoliversteinberg/branch-hop/main/scripts/safari-install.sh | bash
+   ```
+
+   It finds your Apple ID team, downloads the source, builds a signed Branch Hop app into `~/Applications` and opens it. Run the same command to update.
+4. In **Safari › Settings › Extensions**, turn on Branch Hop, and uninstall any temporary copy.
 
 **Permanent for everyone:** a Safari app other people can install for good needs signing with a paid Apple Developer account and Apple's notarization. Until then, coworkers on Safari use the temporary install or build their own signed copy.
 
