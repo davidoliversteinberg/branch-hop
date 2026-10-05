@@ -18,7 +18,7 @@ else
   signing=(CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="")
 fi
 xcodebuild -project "safari/Branch Hop/Branch Hop.xcodeproj" -scheme "Branch Hop" -configuration Release \
-  -derivedDataPath safari/build "${signing[@]}" -quiet build
+  -destination "generic/platform=macOS" -derivedDataPath safari/build "${signing[@]}" -quiet build
 
 mkdir -p "$HOME/Applications"
 rm -rf "$HOME/Applications/Branch Hop.app"

@@ -128,8 +128,8 @@ export function buildGroups({ ext, shared, me, seen }: Sources, view: View, quer
     Math.max(lastVisit(key)?.at ?? 0, ext.pins.find((p) => p.key === key)?.addedAt ?? 0, ...ext.favorites.filter((f) => f.key === key).map((f) => f.addedAt));
   const pinnedOrder = [...pinnedKeys].sort((a, b) => activity(b) - activity(a));
   const bookmarksOf = (key: string) => bookmarks.filter((f) => f.key === key).sort((a, b) => a.addedAt - b.addedAt);
-  // Your other branches, newest first. The one in this tab is already at the top of the popup.
-  const recentKeys = [...new Set(ext.recent.map((v) => v.key))].filter((k) => !pinnedKeys.has(k) && k !== here?.key).slice(0, RECENT_BRANCHES);
+  // Every branch you've opened, newest first, starting with this tab's so you can always pin it.
+  const recentKeys = [...new Set([...(here ? [here.key] : []), ...ext.recent.map((v) => v.key)])].filter((k) => !pinnedKeys.has(k)).slice(0, RECENT_BRANCHES);
 
   const q = query.trim().toLowerCase();
   if (!q) {
